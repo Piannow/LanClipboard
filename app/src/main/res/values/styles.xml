@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 4.4（API 19）没有 Theme.Material，基类用 Holo；21+ 见 values-v21 -->
+    <style name="AppTheme" parent="@android:style/Theme.Holo.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/dim</item>
+    </style>
+
+    <!-- 遥控器 / 方向键聚焦时的高亮轮廓 -->
+    <style name="Focusable">
+        <item name="android:focusable">true</item>
+        <item name="android:focusableInTouchMode">false</item>
+    </style>
+
+    <style name="BridgeTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
+
+    <style name="Card">
+        <item name="android:orientation">vertical</item>
+        <item name="android:background">@color/surface</item>
+        <item name="android:padding">16dp</item>
+    </style>
+
+    <style name="SectionTitle">
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Value">
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:lineSpacingExtra">4dp</item>
+    </style>
+
+    <style name="Hint">
+        <item name="android:textColor">@color/dim</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:lineSpacingExtra">3dp</item>
+    </style>
+
+    <style name="BigButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">58dp</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:background">@drawable/bg_btn_secondary</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+</resources>

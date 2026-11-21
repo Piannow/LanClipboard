@@ -1,0 +1,23 @@
+# Android / Gradle build output
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+captures/
+
+# Signing secrets: keep release keys on your own machine.
+*.jks
+*.keystore
+keystore.properties
+
+# Binary deliverables belong in GitHub Releases.
+*.apk
+*.aab
+*.log
+
+# OS / editor files
+.DS_Store
+Thumbs.db

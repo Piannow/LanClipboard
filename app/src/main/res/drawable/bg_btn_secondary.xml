@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 次按钮：深灰底；遥控器聚焦时加绿色描边 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/surface2" />
+            <stroke android:width="3dp" android:color="@color/accent" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/line" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/surface2" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+</selector>

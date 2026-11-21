@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主按钮：绿色底；遥控器聚焦时加白色描边，保证电视上看得到焦点 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/accent" />
+            <stroke android:width="3dp" android:color="@color/text" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/accent_pressed" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/accent" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+</selector>

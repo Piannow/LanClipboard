@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">局域网剪切板</string>
+    <string name="a11y_label">剪切板同步复制服务</string>
+    <string name="accessibility_desc">接收手机发来的文字后，在本应用内悄悄执行全选与复制，让机顶盒系统剪切板保持同步。只作用于本应用自己的窗口，不会读取其他应用的内容。</string>
+</resources>

@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.lanclip.sync'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.lanclip.sync"
+        // 19 = Android 4.4，覆盖大量 IPTV 机顶盒（华为 EC6108 / 中兴 B860AV / 创维 E900 等）
+        minSdk 19
+        targetSdk 28
+        versionCode 2
+        versionName "1.1"
+    }
+
+    signingConfigs {
+        release {
+            // 私有签名通过未纳入版本控制的 keystore.properties 注入。
+            def props = new Properties()
+            def propsFile = rootProject.file('keystore.properties')
+            if (propsFile.exists()) {
+                propsFile.withInputStream { props.load(it) }
+                storeFile file(props.getProperty('storeFile'))
+                storePassword props.getProperty('storePassword')
+                keyAlias props.getProperty('keyAlias')
+                keyPassword props.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            def propsFile = rootProject.file('keystore.properties')
+            if (propsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding = "UTF-8"
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+        // 本项目用于局域网侧载，不上架 Google Play；保留 targetSdk 28 以维持原有后台剪切板行为。
+        disable 'ExpiredTargetSdkVersion'
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "局域网剪切板-v${variant.versionName}-${variant.buildType.name}.apk"
+        }
+    }
+}

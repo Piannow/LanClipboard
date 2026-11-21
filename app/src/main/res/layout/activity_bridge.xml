@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="1dp"
+    android:layout_height="1dp"
+    android:background="@android:color/transparent">
+
+    <EditText
+        android:id="@+id/bridge_edit"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:background="@null"
+        android:clickable="true"
+        android:enabled="true"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:inputType="text"
+        android:importantForAccessibility="yes"
+        android:padding="0dp"
+        android:textColor="@android:color/transparent"
+        android:textSize="1sp" />
+</FrameLayout>
