@@ -1,10 +1,25 @@
 # LanClipboard · 局域网剪切板
 
 [![AstrBotLite](https://img.shields.io/badge/for-AstrBotLite-7c5cff)](https://github.com/Piannow/AstrBotLite)
+[![Coding](https://img.shields.io/badge/code-100%25%20Web%20Coding-7c5cff.svg)](README.md)
 [![Android](https://img.shields.io/badge/Android-4.4%2B-3ddc84.svg)](#兼容性)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **为 [AstrBotLite](https://github.com/Piannow/AstrBotLite) 编写的 Android 机顶盒辅助工具。**
+
+## 100% Web Coding
+
+本项目 **100% 由 AI 通过自然语言对话（Web Coding）生成**：需求描述、代码、调试、构建脚本与文档均在对话中完成，人类只负责提出需求与验收。
+
+说实话，做这个工具纯粹就是因为**懒**：不想在机顶盒上用遥控器对着电视逐字填写人设卡、提示词那种长文本。所以干脆在手机上复制好，直接发到机顶盒剪切板再粘贴。
+
+因此：
+
+- 代码风格可能不统一，但每个功能都有明确的现实目标
+- 欢迎提交 Issue / PR 一起完善
+- 发布前请自行评估稳定性
+
+## 功能简述
 
 在机顶盒上用遥控器填写 AstrBotLite 的人设卡、提示词等长文本十分麻烦。LanClipboard 让你可以在手机上复制或输入文字，通过局域网发送到机顶盒剪切板，再粘贴到 AstrBotLite，省去在电视上逐字输入的过程。
 
