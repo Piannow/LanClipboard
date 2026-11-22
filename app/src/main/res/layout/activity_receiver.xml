@@ -215,5 +215,16 @@
             android:layout_marginTop="16dp"
             android:layout_marginBottom="10dp"
             android:text="提示：手机浏览器打开 http://机顶盒IP:9527 也能直接发送文字。" />
+
+        <Button
+            android:id="@+id/btn_update"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_btn_primary"
+            android:text="更新中心 · 检测 / 安装"
+            android:textColor="@color/accent_dark"
+            android:textSize="16sp"
+            android:textStyle="bold" />
     </LinearLayout>
 </ScrollView>
