@@ -11,14 +11,19 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 局域网扫描：探测 /24 网段内开放 ADB 无线调试端口(5555) 的设备。
- * 用并发 TCP connect，单端口超时约 200ms，避免阻塞 UI。
+ * 局域网扫描：探测 /24 网段内开放 ADB 无线调试端口(默认 5555-5585) 的设备。
+ * 用并发 TCP connect，单端口超时约 250ms，避免阻塞 UI。
+ * 返回格式：ip:port（找到的 adb 端点）。
  */
 public final class AdbScan {
 
+    public static final int ADB_DEFAULT_PORT = 5555;
+    /** 覆盖绝大多数机顶盒使用的 adb 端口段（部分设备端口会偏移） */
+    public static final int[] PORT_RANGE = {5555, 5585};
+
     public interface Listener {
-        /** found: 扫描出的设备 IP 列表（实时追加）；done: 扫描结束。 */
-        void onFound(String ip);
+        /** found: 发现一个 adb 端点，格式 "ip:port"。 */
+        void onFound(String endpoint);
         void onDone(int total);
     }
 
@@ -26,10 +31,19 @@ public final class AdbScan {
     }
 
     /**
-     * 扫描指定本地 IP 所在 /24 网段。
-     * @param localIp 本机 IPv4，例如 192.168.1.5
+     * 扫描 /24 网段内的端口段。
+     * @param localIp 本机 IPv4
      */
-    public static void scan(String localIp, int port, Listener listener) {
+    public static void scan(String localIp, Listener listener) {
+        scanRange(localIp, PORT_RANGE[0], PORT_RANGE[1], listener);
+    }
+
+    /** 只扫单个端口（手动指定时用）。 */
+    public static void scanPort(String localIp, int port, Listener listener) {
+        scanRange(localIp, port, port, listener);
+    }
+
+    private static void scanRange(String localIp, int portStart, int portEnd, Listener listener) {
         String prefix = prefixOf(localIp);
         if (prefix == null) {
             if (listener != null) {
@@ -37,23 +51,36 @@ public final class AdbScan {
             }
             return;
         }
-        final List<String> results = Collections.synchronizedList(new ArrayList<String>());
-        List<String> all = new ArrayList<>();
-        for (int i = 1; i <= 254; i++) {
-            all.add(prefix + "." + i);
+        if (portStart > portEnd) {
+            int tmp = portStart;
+            portStart = portEnd;
+            portEnd = tmp;
         }
-        final int total = all.size();
+        final List<String> results = Collections.synchronizedList(new ArrayList<String>());
+        // 组合所有 ip:port
+        List<String> targets = new ArrayList<>();
+        for (int i = 1; i <= 254; i++) {
+            String ip = prefix + "." + i;
+            for (int p = portStart; p <= portEnd; p++) {
+                targets.add(ip + ":" + p);
+            }
+        }
+        final int total = targets.size();
         final CountDownLatch latch = new CountDownLatch(total);
-        ExecutorService pool = Executors.newFixedThreadPool(40);
-        for (final String ip : all) {
+        ExecutorService pool = Executors.newFixedThreadPool(60);
+        for (final String target : targets) {
             pool.execute(() -> {
+                int ci = target.lastIndexOf(':');
+                String ip = target.substring(0, ci);
+                int port = Integer.parseInt(target.substring(ci + 1));
                 try {
                     Socket s = new Socket();
                     s.connect(new InetSocketAddress(ip, port), 250);
                     s.close();
-                    if (listener != null && !results.contains(ip)) {
-                        results.add(ip);
-                        listener.onFound(ip);
+                    String ep = ip + ":" + port;
+                    if (listener != null && !results.contains(ep)) {
+                        results.add(ep);
+                        listener.onFound(ep);
                     }
                 } catch (Throwable ignored) {
                 } finally {
@@ -61,10 +88,9 @@ public final class AdbScan {
                 }
             });
         }
-        // 后台等待全部完成
         new Thread(() -> {
             try {
-                latch.await(40, TimeUnit.SECONDS);
+                latch.await(60, TimeUnit.SECONDS);
             } catch (InterruptedException ignored) {
             }
             pool.shutdownNow();

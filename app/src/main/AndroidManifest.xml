@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 自更新：Android 8.0+ 安装未知应用 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 存储：下载 APK 到外部存储（兼容 Android 4.4-9；10+ 走 scoped storage） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- 机顶盒 / TV：无触摸屏也必须能安装，遥控器方向键可操作 -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

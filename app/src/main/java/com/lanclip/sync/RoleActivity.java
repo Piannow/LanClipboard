@@ -18,6 +18,8 @@ public class RoleActivity extends Activity {
         View box = findViewById(R.id.btn_box);
         phone.setOnClickListener(v -> startActivity(new Intent(this, SenderActivity.class)));
         box.setOnClickListener(v -> startActivity(new Intent(this, ReceiverActivity.class)));
+        findViewById(R.id.btn_update).setOnClickListener(v ->
+                startActivity(new Intent(this, UpdateActivity.class)));
 
         // 机顶盒 / TV 上默认聚焦「接收端」，手机默认聚焦「发送端」；避免遥控器无焦点
         PackageManager pm = getPackageManager();
