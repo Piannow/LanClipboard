@@ -84,20 +84,26 @@ public final class AdbClient {
         in = new DataInputStream(socket.getInputStream());
         out = socket.getOutputStream();
 
-        // 发送 CNXN（hello）
+        // 发送 CNXN（hello）—— 头部 24 字节，offset 12 必须是 payload 长度
         byte[] banner = "host::lanclipboard-updater".getBytes(StandardCharsets.UTF_8);
         byte[] cnxn = new byte[24 + banner.length];
-        writeInt(cnxn, 0, A_CNXN);
-        writeInt(cnxn, 4, VERSION);
-        writeInt(cnxn, 8, 4096);       // max payload
-        writeInt(cnxn, 12, 0);         // 系统标识（0=协议）
-        writeInt(cnxn, 16, 0);
-        writeInt(cnxn, 20, 0);
+        writeInt(cnxn, 0, A_CNXN);       // command
+        writeInt(cnxn, 4, VERSION);      // arg0 = 协议版本
+        writeInt(cnxn, 8, 4096);         // arg1 = max payload
+        writeInt(cnxn, 12, banner.length); // data_length（关键！必须=payload 字节数）
+        writeInt(cnxn, 16, 0);           // data_check（>=0x01000000 忽略）
+        writeInt(cnxn, 20, 0);           // magic（>=0x01000000 忽略）
         System.arraycopy(banner, 0, cnxn, 24, banner.length);
         writeRaw(cnxn);
 
         // 读响应：可能 AUTH（需认证）或直接 A_CNXN（已授权）
-        int attempts = 0;
+        // AOSP 认证流程：
+        //   1) adbd 发 AUTH(TOKEN)，我们用私钥签名发 AUTH(SIGNATURE)
+        //   2) 若 key 未配对，签名不被接受，adbd 再发 AUTH(TOKEN)
+        //      前 2 次尝试签名；仍不过就发 AUTH(RSAPUBLICKEY) 推送公钥触发配对
+        //   3) 配对后 adbd 发 AUTH(TOKEN)，我们签名，adbd 回 CNXN
+        int tokenCount = 0;
+        boolean pubkeySent = false;
         while (true) {
             int cmd = readInt();
             int arg0 = readInt();
@@ -106,10 +112,10 @@ public final class AdbClient {
             byte[] payload = len > 0 ? readFully(len) : new byte[0];
 
             if (cmd == A_AUTH) {
-                if (attempts++ > 4) {
+                if (tokenCount++ > 6) {
                     throw new IOException("ADB 认证失败（多次尝试后仍未通过）");
                 }
-                handleAuth(arg0, arg1, payload);
+                pubkeySent = handleAuth(arg0, payload, tokenCount, pubkeySent);
             } else if (cmd == A_CNXN) {
                 peerBanner = new String(payload, StandardCharsets.UTF_8);
                 break;
@@ -125,27 +131,22 @@ public final class AdbClient {
         // 为简化，交给 open() 时统一处理
     }
 
-    private void handleAuth(int arg0, int arg1, byte[] payload) throws IOException, GeneralSecurityException {
-        if (arg0 == AUTH_TOKEN) {
-            KeyPair kp = ensureKey();
-            // 尝试用已有签名
+    private boolean handleAuth(int authType, byte[] payload, int tokenCount, boolean pubkeySent) throws IOException, GeneralSecurityException {
+        if (authType == AUTH_TOKEN) {
+            // 前 2 次 token 尝试签名；若未通过且未推公钥，则推公钥触发配对；
+            // 推过公钥后，后续 token 一律签名（配对成功后的确认签名）。
+            boolean sendPubkey = !pubkeySent && tokenCount > 2;
+            if (sendPubkey) {
+                String pub = encodePublicKey(ensureKey().getPublic());
+                writeRaw(buildAuth(AUTH_RSAPUBLICKEY, pub.getBytes(StandardCharsets.UTF_8)));
+                return true;
+            }
             Signature sig = Signature.getInstance("SHA1withRSA");
-            sig.initSign(kp.getPrivate());
+            sig.initSign(ensureKey().getPrivate());
             sig.update(payload);
-            byte[] signature = sig.sign();
-
-            // 发 AUTH(SIGNATURE)
-            byte[] pkt = buildAuth(AUTH_SIGNATURE, signature);
-            writeRaw(pkt);
-            // 等待：可能 AUTH(TOKEN) 再次（签名不对），或 CNXN
-            // 由外层循环处理
-        } else if (arg0 == AUTH_RSAPUBLICKEY) {
-            // 对方要求我们提供公钥（第一次配对）
-            KeyPair kp = ensureKey();
-            String pub = encodePublicKey(kp.getPublic());
-            byte[] pkt = buildAuth(AUTH_RSAPUBLICKEY, pub.getBytes(StandardCharsets.UTF_8));
-            writeRaw(pkt);
+            writeRaw(buildAuth(AUTH_SIGNATURE, sig.sign()));
         }
+        return pubkeySent;
     }
 
     private KeyPair ensureKey() throws GeneralSecurityException {
@@ -235,13 +236,37 @@ public final class AdbClient {
         return pkt;
     }
 
-    /** 把公钥编码成 ADB 的 "base64 ssh-rsa keyname" 格式 */
+    /**
+     * 把 RSA 公钥编码成 ADB 要求的 OpenSSH ssh-rsa 格式：
+     *   base64( string("ssh-rsa") + string(e) + string(n) ) + " " + 注释
+     * 注意：ADB 用 SSH 公钥格式（rsa_public_key / adb_auth_sign 需要），
+     * 不能用 X.509 DER。用 BigInteger 取 e/n 后按 SSH wire 格式打包。
+     */
     private static String encodePublicKey(PublicKey pub) throws GeneralSecurityException {
-        byte[] key = pub.getEncoded();
-        // ADB 期望 ssh-rsa 格式，不是 X.509。
-        // 简化：直接用 DER 的 base64 + 前缀（部分设备可接受）。更严谨要转 OpenSSH 格式。
-        String b64 = Base64.encodeToString(key, Base64.NO_WRAP);
+        byte[] n = ((java.security.interfaces.RSAPublicKey) pub).getModulus().toByteArray();
+        byte[] e = ((java.security.interfaces.RSAPublicKey) pub).getPublicExponent().toByteArray();
+        byte[] type = "ssh-rsa".getBytes(StandardCharsets.UTF_8);
+        java.io.ByteArrayOutputStream blob = new java.io.ByteArrayOutputStream();
+        writeLen(blob, type.length);
+        writeBytes(blob, type);
+        writeLen(blob, e.length);
+        writeBytes(blob, e);
+        writeLen(blob, n.length);
+        writeBytes(blob, n);
+        String b64 = Base64.encodeToString(blob.toByteArray(), Base64.NO_WRAP);
         return b64 + " lanclip@phone";
+    }
+
+    /** 把 4 字节大端长度写入 blob（OpenSSH wire 格式）。 */
+    private static void writeLen(java.io.ByteArrayOutputStream bos, int len) {
+        bos.write((len >>> 24) & 0xFF);
+        bos.write((len >>> 16) & 0xFF);
+        bos.write((len >>> 8) & 0xFF);
+        bos.write(len & 0xFF);
+    }
+
+    private static void writeBytes(java.io.ByteArrayOutputStream bos, byte[] data) {
+        bos.write(data, 0, data.length);
     }
 
     private static void writeInt(byte[] buf, int off, int value) {
