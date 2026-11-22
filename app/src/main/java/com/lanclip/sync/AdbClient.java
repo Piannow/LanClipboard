@@ -254,8 +254,9 @@ public final class AdbClient {
      * 不能用 X.509 DER。用 BigInteger 取 e/n 后按 SSH wire 格式打包。
      */
     private static String encodePublicKey(PublicKey pub) throws GeneralSecurityException {
-        byte[] n = ((java.security.interfaces.RSAPublicKey) pub).getModulus().toByteArray();
-        byte[] e = ((java.security.interfaces.RSAPublicKey) pub).getPublicExponent().toByteArray();
+        // SSH mpint 要求去掉 BigInteger.toByteArray() 可能带的前导 0x00（正数符号位）
+        byte[] n = stripLeadingZero(((java.security.interfaces.RSAPublicKey) pub).getModulus().toByteArray());
+        byte[] e = stripLeadingZero(((java.security.interfaces.RSAPublicKey) pub).getPublicExponent().toByteArray());
         byte[] type = "ssh-rsa".getBytes(StandardCharsets.UTF_8);
         java.io.ByteArrayOutputStream blob = new java.io.ByteArrayOutputStream();
         writeLen(blob, type.length);
@@ -266,6 +267,16 @@ public final class AdbClient {
         writeBytes(blob, n);
         String b64 = Base64.encodeToString(blob.toByteArray(), Base64.NO_WRAP);
         return b64 + " lanclip@phone";
+    }
+
+    /** 去掉开头的多余 0x00（BigInteger 正数符号位），但保留至少 1 字节。 */
+    private static byte[] stripLeadingZero(byte[] data) {
+        if (data.length > 1 && data[0] == 0) {
+            byte[] out = new byte[data.length - 1];
+            System.arraycopy(data, 1, out, 0, out.length);
+            return out;
+        }
+        return data;
     }
 
     /** 把 4 字节大端长度写入 blob（OpenSSH wire 格式）。 */
