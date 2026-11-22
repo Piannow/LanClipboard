@@ -84,15 +84,15 @@ public final class AdbClient {
         in = new DataInputStream(socket.getInputStream());
         out = socket.getOutputStream();
 
-        // 发送 CNXN（hello）—— 头部 24 字节，offset 12 必须是 payload 长度
+        // 发送 CNXN（hello）—— 头部 24 字节，magic = command ^ 0xffffffff
         byte[] banner = "host::lanclipboard-updater".getBytes(StandardCharsets.UTF_8);
         byte[] cnxn = new byte[24 + banner.length];
         writeInt(cnxn, 0, A_CNXN);       // command
         writeInt(cnxn, 4, VERSION);      // arg0 = 协议版本
         writeInt(cnxn, 8, 4096);         // arg1 = max payload
-        writeInt(cnxn, 12, banner.length); // data_length（关键！必须=payload 字节数）
-        writeInt(cnxn, 16, 0);           // data_check（>=0x01000000 忽略）
-        writeInt(cnxn, 20, 0);           // magic（>=0x01000000 忽略）
+        writeInt(cnxn, 12, banner.length); // data_length
+        writeInt(cnxn, 16, checksum(banner)); // data_check（>=0x01000000 忽略但填上更稳）
+        writeInt(cnxn, 20, A_CNXN ^ 0xffffffff); // magic（必须 = command ^ 0xffffffff）
         System.arraycopy(banner, 0, cnxn, 24, banner.length);
         writeRaw(cnxn);
 
@@ -226,13 +226,24 @@ public final class AdbClient {
         fos.close();
     }
 
+    /** AOSP data_check：对 data 逐字节求和（32 位无符号取模）。 */
+    private static int checksum(byte[] data) {
+        int sum = 0;
+        for (byte b : data) {
+            sum += b & 0xFF;
+        }
+        return sum;
+    }
+
     private static byte[] buildAuth(int type, byte[] payload) {
         byte[] pkt = new byte[24 + payload.length];
         writeInt(pkt, 0, A_AUTH);
         writeInt(pkt, 4, type);
         writeInt(pkt, 8, 0);
         writeInt(pkt, 12, payload.length);
-        System.arraycopy(payload, 0, pkt, 16, payload.length);
+        writeInt(pkt, 16, checksum(payload));
+        writeInt(pkt, 20, A_AUTH ^ 0xffffffff);
+        System.arraycopy(payload, 0, pkt, 24, payload.length);
         return pkt;
     }
 
@@ -337,7 +348,9 @@ public final class AdbClient {
         writeInt(pkt, 4, id);
         writeInt(pkt, 8, 0);
         writeInt(pkt, 12, payload.length);
-        System.arraycopy(payload, 0, pkt, 16, payload.length);
+        writeInt(pkt, 16, checksum(payload));
+        writeInt(pkt, 20, A_OPEN ^ 0xffffffff);
+        System.arraycopy(payload, 0, pkt, 24, payload.length);
         writeRaw(pkt);
 
         // 等 OKAY
@@ -366,6 +379,8 @@ public final class AdbClient {
         writeInt(pkt, 4, arg0);
         writeInt(pkt, 8, arg1);
         writeInt(pkt, 12, 0);
+        writeInt(pkt, 16, 0);
+        writeInt(pkt, 20, cmd ^ 0xffffffff);
         return pkt;
     }
 
