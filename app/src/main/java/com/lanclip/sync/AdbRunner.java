@@ -147,6 +147,16 @@ public final class AdbRunner {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         // HOME 指向应用私有目录，让 adb 生成/复用 ~/.android/adbkey
         pb.environment().put("HOME", ctx.getFilesDir().getAbsolutePath());
+        // adb 日志/临时文件默认写 /tmp，Android 上 /tmp 不存在会导致 daemon 起不来。
+        // 用 TMPDIR 指到应用私有目录（一定存在且可写）。
+        File tmp = new File(ctx.getFilesDir(), "tmp");
+        if (!tmp.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.mkdirs();
+        }
+        pb.environment().put("TMPDIR", tmp.getAbsolutePath());
+        pb.environment().put("TMP", tmp.getAbsolutePath());
+        pb.environment().put("TEMP", tmp.getAbsolutePath());
         pb.environment().put("ANDROID_ADB_SERVER_PORT", String.valueOf(ADB_SERVER_PORT));
         pb.redirectErrorStream(true);
         Process p = pb.start();
