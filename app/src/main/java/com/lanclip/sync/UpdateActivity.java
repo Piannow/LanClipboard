@@ -140,18 +140,25 @@ public class UpdateActivity extends Activity {
             final String ip = endpoint.substring(0, ci);
             final int port = Integer.parseInt(endpoint.substring(ci + 1));
             try {
-                AdbClient adb = new AdbClient(UpdateActivity.this, ip, port);
-                adb.connect();
-                adb.close();
-                connected = endpoint;
-                connectedIp = ip;
-                connectedPort = port;
-                remoteVersion = null;
-                ui.post(() -> {
-                    tvConnected.setText("已连接：" + endpoint);
-                    tvRemoteVer.setText("被控端版本：-（点「检测被控端版本」）");
-                    appendLog("已连接 " + endpoint);
-                });
+                AdbRunner runner = new AdbRunner(UpdateActivity.this, ip, port);
+                boolean ok = runner.connect();
+                runner.disconnect();
+                if (ok) {
+                    connected = endpoint;
+                    connectedIp = ip;
+                    connectedPort = port;
+                    remoteVersion = null;
+                    ui.post(() -> {
+                        tvConnected.setText("已连接：" + endpoint);
+                        tvRemoteVer.setText("被控端版本：-（点「检测被控端版本」）");
+                        appendLog("已连接 " + endpoint);
+                    });
+                } else {
+                    ui.post(() -> {
+                        tvConnected.setText("连接失败：" + endpoint);
+                        appendLog("连接 " + endpoint + " 失败（adb connect 未成功）");
+                    });
+                }
             } catch (Throwable t) {
                 ui.post(() -> {
                     tvConnected.setText("连接失败：" + endpoint);
@@ -170,11 +177,10 @@ public class UpdateActivity extends Activity {
         }
         tvRemoteVer.setText("读取中…");
         worker.execute(() -> {
-            AdbClient adb = null;
+            AdbRunner runner = null;
             try {
-                adb = new AdbClient(UpdateActivity.this, connectedIp, connectedPort);
-                adb.connect();
-                String ver = readRemoteVersion(adb);
+                runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
+                String ver = runner.remoteVersion(SELF_PACKAGE);
                 remoteVersion = ver;
                 ui.post(() -> {
                     tvRemoteVer.setText("被控端版本：" + (ver == null ? "未安装" : ver));
@@ -186,22 +192,14 @@ public class UpdateActivity extends Activity {
                     appendLog("读被控端版本失败：" + t.getMessage());
                 });
             } finally {
-                if (adb != null) {
-                    adb.close();
+                if (runner != null) {
+                    try {
+                        runner.disconnect();
+                    } catch (Throwable ignored) {
+                    }
                 }
             }
         });
-    }
-
-    private String readRemoteVersion(AdbClient adb) throws Exception {
-        String out = adb.shell("dumpsys package " + SELF_PACKAGE);
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("versionName=([0-9.]+)").matcher(out);
-        if (m.find()) {
-            return m.group(1);
-        }
-        // 未找到可能未安装
-        String pkgs = adb.shell("pm list packages " + SELF_PACKAGE);
-        return pkgs.contains("package:" + SELF_PACKAGE) ? "?" : null;
     }
 
     // ---------- 下载 APK 到本机 ----------
@@ -243,29 +241,29 @@ public class UpdateActivity extends Activity {
         }
         btnInstall.setEnabled(false);
         worker.execute(() -> {
-            AdbClient adb = null;
+            AdbRunner runner = null;
             try {
                 File local = pickLocalApk();
                 if (local == null) {
                     ui.post(() -> appendLog("本地无 APK，请先下载一次"));
                     return;
                 }
-                adb = new AdbClient(UpdateActivity.this, connectedIp, connectedPort);
-                adb.connect();
-                boolean installed = adb.isPackageInstalled(SELF_PACKAGE);
+                runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
+                boolean installed = runner.isPackageInstalled(SELF_PACKAGE);
                 if (installed && remoteVersion == null) {
-                    // 尝试读版本
-                    remoteVersion = readRemoteVersion(adb);
+                    remoteVersion = runner.remoteVersion(SELF_PACKAGE);
                 }
-                byte[] bytes = readAllBytes(local);
                 appendLog("推送 " + local.getName() + " 到 " + connected + "…");
-                String result = adb.install(bytes, SELF_PACKAGE);
+                String result = runner.install(local.getAbsolutePath());
                 appendLog("安装结果：" + result.trim());
             } catch (Throwable t) {
                 ui.post(() -> appendLog("推送失败：" + t.getMessage()));
             } finally {
-                if (adb != null) {
-                    adb.close();
+                if (runner != null) {
+                    try {
+                        runner.disconnect();
+                    } catch (Throwable ignored) {
+                    }
                 }
                 ui.post(() -> btnInstall.setEnabled(true));
             }
@@ -308,18 +306,6 @@ public class UpdateActivity extends Activity {
             sb.append(lines[i]).append('\n');
         }
         tvLog.setText("运行日志：\n" + sb.toString().trim());
-    }
-
-    private static byte[] readAllBytes(File file) throws java.io.IOException {
-        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-        java.io.FileInputStream fis = new java.io.FileInputStream(file);
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = fis.read(buf)) != -1) {
-            bos.write(buf, 0, n);
-        }
-        fis.close();
-        return bos.toByteArray();
     }
 
     @Override
