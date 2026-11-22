@@ -32,7 +32,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="14dp"
                 android:layout_weight="1"
-                android:text="更新中心"
+                android:text="盒子管理"
                 android:textColor="@color/text"
                 android:textSize="22sp"
                 android:textStyle="bold" />
@@ -48,109 +48,23 @@
                 style="@style/SectionTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="本机 · 剪切板 App" />
+                android:text="连接被控盒子" />
 
             <TextView
-                android:id="@+id/tv_cur"
-                style="@style/Hint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="当前版本：1.1" />
-
-            <TextView
-                android:id="@+id/tv_self_status"
+                android:id="@+id/tv_devices"
                 style="@style/Value"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="尚未检测" />
+                android:text="未扫描" />
 
-            <Button
-                android:id="@+id/btn_check_self"
+            <ListView
+                android:id="@+id/list_devices"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_btn_primary"
-                android:text="检测剪切板更新"
-                android:textColor="@color/accent_dark"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <Button
-                android:id="@+id/btn_download_self"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_btn_secondary"
-                android:text="下载并安装剪切板新版"
-                android:textColor="@color/text"
-                android:textSize="15sp"
-                android:visibility="gone" />
-        </LinearLayout>
-
-        <LinearLayout
-            style="@style/Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp">
-
-            <TextView
-                style="@style/SectionTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="AstrBotLite 推送" />
-
-            <TextView
-                android:id="@+id/tv_astr_status"
-                style="@style/Value"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="尚未检测" />
-
-            <Button
-                android:id="@+id/btn_check_astr"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_btn_primary"
-                android:text="检测 AstrBotLite 更新"
-                android:textColor="@color/accent_dark"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <Button
-                android:id="@+id/btn_download_astr"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_btn_secondary"
-                android:text="下载并安装 AstrBotLite"
-                android:textColor="@color/text"
-                android:textSize="15sp"
-                android:visibility="gone" />
-        </LinearLayout>
-
-        <LinearLayout
-            style="@style/Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp">
-
-            <TextView
-                style="@style/SectionTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="远程管理 · 局域网机顶盒" />
-
-            <TextView
-                android:id="@+id/tv_remote"
-                style="@style/Hint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="160dp"
                 android:layout_marginTop="6dp"
-                android:text="扫描开放 adb 无线调试端口（默认 5555-5585）的安卓设备。前提：盒子已开无线调试。" />
+                android:divider="@color/line"
+                android:dividerHeight="1dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -165,7 +79,7 @@
                     android:layout_height="44dp"
                     android:layout_weight="1"
                     android:backgroundTint="@color/line"
-                    android:hint="手动端口（留空=自动扫描）"
+                    android:hint="手动端口（留空=自动 5555-5585）"
                     android:inputType="number"
                     android:paddingStart="8dp"
                     android:textColor="@color/text"
@@ -178,19 +92,73 @@
                     android:layout_height="44dp"
                     android:layout_marginStart="8dp"
                     android:background="@drawable/bg_btn_primary"
-                    android:text="扫描局域网"
+                    android:text="扫描"
                     android:textColor="@color/accent_dark"
                     android:textSize="15sp"
                     android:textStyle="bold" />
             </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            style="@style/Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp">
 
             <TextView
-                android:id="@+id/tv_devices"
+                style="@style/SectionTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="被控端" />
+
+            <TextView
+                android:id="@+id/tv_connected"
                 style="@style/Value"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="未连接盒子" />
+
+            <TextView
+                android:id="@+id/tv_remote_ver"
+                style="@style/Hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="被控端版本：-" />
+
+            <Button
+                android:id="@+id/btn_check_remote"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_btn_primary"
+                android:text="检测被控端版本"
+                android:textColor="@color/accent_dark"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_download"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
                 android:layout_marginTop="8dp"
-                android:text="未扫描" />
+                android:background="@drawable/bg_btn_secondary"
+                android:text="下载 APK 到本机"
+                android:textColor="@color/text"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_install"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_btn_primary"
+                android:text="推送安装到已连接盒子"
+                android:textColor="@color/accent_dark"
+                android:textSize="16sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <TextView

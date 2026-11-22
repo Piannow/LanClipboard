@@ -1,14 +1,15 @@
 package com.lanclip.sync;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -19,202 +20,81 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 更新中心：本机自更新 + AstrBotLite 推送 + 局域网远程安装（ADB）。
- * 远程安装只推送本机已下载的 APK，不自动下载最新版。
+ * 盒子管理（手机端）：扫描局域网 → 点选连接盒子 → 检测被控端版本 → 下载 APK 推送安装。
  */
 public class UpdateActivity extends Activity {
 
     private static final String SELF_REPO = "Piannow/LanClipboard";
     private static final String SELF_PREFIX = "LanClipboard";
-    private static final String ASTR_REPO = "Piannow/AstrBotLite";
-    private static final String ASTR_PREFIX = "AstrBotLite";
+    private static final String SELF_PACKAGE = "com.lanclip.sync";
 
-    private TextView tvCur;
-    private TextView tvSelfStatus;
-    private Button btnCheckSelf;
-    private Button btnDownloadSelf;
-    private TextView tvAstrStatus;
-    private Button btnCheckAstr;
-    private Button btnDownloadAstr;
     private TextView tvDevices;
-    private TextView tvLog;
+    private ListView list;
     private EditText etPort;
+    private TextView tvConnected;
+    private TextView tvRemoteVer;
+    private Button btnCheckRemote;
+    private Button btnDownload;
+    private Button btnInstall;
+    private TextView tvLog;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final StringBuilder logBuffer = new StringBuilder();
 
-    private UpdateClient.ReleaseInfo selfRelease;
-    private UpdateClient.ReleaseInfo astrRelease;
-    private final List<String> foundEndpoints = new ArrayList<>();
+    private final List<String> endpoints = new ArrayList<>();
+    private ArrayAdapter<String> adapter;
+    private volatile String connected = null;      // 当前连接的 ip:port
+    private volatile String connectedIp = null;
+    private volatile int connectedPort = 0;
+    private volatile String remoteVersion = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_update);
 
-        tvCur = findViewById(R.id.tv_cur);
-        tvSelfStatus = findViewById(R.id.tv_self_status);
-        btnCheckSelf = findViewById(R.id.btn_check_self);
-        btnDownloadSelf = findViewById(R.id.btn_download_self);
-        tvAstrStatus = findViewById(R.id.tv_astr_status);
-        btnCheckAstr = findViewById(R.id.btn_check_astr);
-        btnDownloadAstr = findViewById(R.id.btn_download_astr);
         tvDevices = findViewById(R.id.tv_devices);
-        tvLog = findViewById(R.id.tv_log);
+        list = findViewById(R.id.list_devices);
         etPort = findViewById(R.id.et_port);
+        tvConnected = findViewById(R.id.tv_connected);
+        tvRemoteVer = findViewById(R.id.tv_remote_ver);
+        btnCheckRemote = findViewById(R.id.btn_check_remote);
+        btnDownload = findViewById(R.id.btn_download);
+        btnInstall = findViewById(R.id.btn_install);
+        tvLog = findViewById(R.id.tv_log);
 
-        tvCur.setText("当前版本：v" + versionName());
+        adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, endpoints) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                View v = super.getView(position, convertView, parent);
+                TextView tv = (TextView) v;
+                String ep = endpoints.get(position);
+                if (ep.equals(connected)) {
+                    tv.setText(ep + "  [已连接]");
+                } else {
+                    tv.setText(ep);
+                }
+                return v;
+            }
+        };
+        list.setAdapter(adapter);
+        list.setOnItemClickListener((parent, view, position, id) -> connectDevice(endpoints.get(position)));
 
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
-        btnCheckSelf.setOnClickListener(v -> checkSelfUpdate());
-        btnDownloadSelf.setOnClickListener(v -> downloadAndInstallSelf());
-        btnCheckAstr.setOnClickListener(v -> checkAstrUpdate());
-        btnDownloadAstr.setOnClickListener(v -> downloadAndInstallAstr());
         findViewById(R.id.btn_scan).setOnClickListener(v -> scanLan());
-        btnCheckSelf.requestFocus();
-
-        maybeRequestStorage();
+        btnCheckRemote.setOnClickListener(v -> checkRemoteVersion());
+        btnDownload.setOnClickListener(v -> downloadApk());
+        btnInstall.setOnClickListener(v -> pushInstall());
+        findViewById(R.id.btn_scan).requestFocus();
     }
 
-    private void maybeRequestStorage() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 101);
-            }
-        }
-    }
-
-    private String versionName() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Throwable t) {
-            return "?";
-        }
-    }
-
-    // ---------- 本机自更新 ----------
-
-    private void checkSelfUpdate() {
-        tvSelfStatus.setText("检测中…");
-        worker.execute(() -> {
-            try {
-                UpdateClient.ReleaseInfo rel = new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).latest();
-                int[] cur = UpdateClient.parseVersion(versionName());
-                int[] latest = UpdateClient.parseVersion(rel.version);
-                boolean hasNew = UpdateClient.greater(latest, cur);
-                ui.post(() -> {
-                    selfRelease = rel;
-                    if (hasNew) {
-                        tvSelfStatus.setText("发现新版本 " + rel.version + (rel.hasApk() ? "" : "（无 APK）"));
-                        btnDownloadSelf.setVisibility(rel.hasApk() ? Button.VISIBLE : Button.GONE);
-                    } else {
-                        tvSelfStatus.setText("已是最新（" + rel.version + "）");
-                        btnDownloadSelf.setVisibility(Button.GONE);
-                    }
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    tvSelfStatus.setText("检测失败：" + t.getMessage());
-                    appendLog("自更新检测失败：" + t.getMessage());
-                });
-            }
-        });
-    }
-
-    private void downloadAndInstallSelf() {
-        if (selfRelease == null || !selfRelease.hasApk()) {
-            Toast.makeText(this, "先检测更新", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!InstallHelper.canInstall(this)) {
-            InstallHelper.openInstallSettings(this);
-            Toast.makeText(this, "请允许「安装未知应用」后重试", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        btnDownloadSelf.setEnabled(false);
-        tvSelfStatus.setText("下载中…");
-        worker.execute(() -> {
-            try {
-                File apk = UpdateClient.download(this, selfRelease.apkUrl, "LanClipboard-new.apk",
-                        (done, total) -> ui.post(() -> tvSelfStatus.setText("下载中 " + pct(done, total))));
-                ui.post(() -> {
-                    tvSelfStatus.setText("已下载 " + selfRelease.version + "，请点系统安装");
-                    InstallHelper.promptInstall(this, apk);
-                    btnDownloadSelf.setEnabled(true);
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    tvSelfStatus.setText("下载失败：" + t.getMessage());
-                    btnDownloadSelf.setEnabled(true);
-                });
-            }
-        });
-    }
-
-    // ---------- AstrBotLite 推送 ----------
-
-    private void checkAstrUpdate() {
-        tvAstrStatus.setText("检测中…");
-        worker.execute(() -> {
-            try {
-                UpdateClient.ReleaseInfo rel = new UpdateClient.Checker(ASTR_REPO, ASTR_PREFIX).latest();
-                ui.post(() -> {
-                    astrRelease = rel;
-                    if (rel.hasApk()) {
-                        tvAstrStatus.setText("AstrBotLite 最新 " + rel.version + "（" + rel.apkName + "）");
-                        btnDownloadAstr.setVisibility(Button.VISIBLE);
-                    } else {
-                        tvAstrStatus.setText("AstrBotLite 未发布 APK");
-                        btnDownloadAstr.setVisibility(Button.GONE);
-                    }
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    tvAstrStatus.setText("检测失败：" + t.getMessage());
-                    appendLog("AstrBotLite 检测失败：" + t.getMessage());
-                });
-            }
-        });
-    }
-
-    private void downloadAndInstallAstr() {
-        if (astrRelease == null || !astrRelease.hasApk()) {
-            Toast.makeText(this, "先检测更新", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!InstallHelper.canInstall(this)) {
-            InstallHelper.openInstallSettings(this);
-            Toast.makeText(this, "请允许「安装未知应用」后重试", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        btnDownloadAstr.setEnabled(false);
-        tvAstrStatus.setText("下载中…");
-        worker.execute(() -> {
-            try {
-                File apk = UpdateClient.download(this, astrRelease.apkUrl, "AstrBotLite.apk",
-                        (done, total) -> ui.post(() -> tvAstrStatus.setText("下载中 " + pct(done, total))));
-                ui.post(() -> {
-                    tvAstrStatus.setText("已下载 AstrBotLite " + astrRelease.version + "，请点系统安装");
-                    InstallHelper.promptInstall(this, apk);
-                    btnDownloadAstr.setEnabled(true);
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    tvAstrStatus.setText("下载失败：" + t.getMessage());
-                    btnDownloadAstr.setEnabled(true);
-                });
-            }
-        });
-    }
-
-    // ---------- 局域网远程安装（只推送本机 APK） ----------
+    // ---------- 扫描并列出 ----------
 
     private void scanLan() {
         tvDevices.setText("扫描中…");
-        foundEndpoints.clear();
+        endpoints.clear();
+        adapter.notifyDataSetChanged();
         List<String> ips = Util.localIpv4();
         if (ips.isEmpty()) {
             tvDevices.setText("未连接局域网");
@@ -222,19 +102,21 @@ public class UpdateActivity extends Activity {
         }
         final String myIp = ips.get(0);
         String manual = etPort.getText() == null ? "" : etPort.getText().toString().trim();
-        appendLog("开始扫描 " + myIp + " 所在网段…");
+        appendLog("扫描 " + myIp + " 所在网段…");
         AdbScan.Listener listener = new AdbScan.Listener() {
             @Override
             public void onFound(final String endpoint) {
                 ui.post(() -> {
-                    appendLog("发现 adb 设备：" + endpoint);
-                    pushToBox(endpoint);
+                    if (!endpoints.contains(endpoint)) {
+                        endpoints.add(endpoint);
+                        adapter.notifyDataSetChanged();
+                    }
                 });
             }
 
             @Override
             public void onDone(final int total) {
-                ui.post(() -> tvDevices.setText("扫描完成，共 " + total + " 个 adb 端点"));
+                ui.post(() -> tvDevices.setText("找到 " + total + " 个盒子，点选连接"));
             }
         };
         if (manual.isEmpty()) {
@@ -249,39 +131,147 @@ public class UpdateActivity extends Activity {
         }
     }
 
-    /** 把本机已下载的剪切板 APK 推送到盒子（已装则跳过）。不自动下载最新版。 */
-    private void pushToBox(final String endpoint) {
+    // ---------- 点选连接 ----------
+
+    private void connectDevice(final String endpoint) {
+        tvDevices.setText("连接 " + endpoint + "…");
         worker.execute(() -> {
             int ci = endpoint.lastIndexOf(':');
-            String ip = endpoint.substring(0, ci);
-            int port = Integer.parseInt(endpoint.substring(ci + 1));
+            final String ip = endpoint.substring(0, ci);
+            final int port = Integer.parseInt(endpoint.substring(ci + 1));
             try {
-                File local = pickLocalApk();
-                if (local == null) {
-                    appendLog(ip + "：本地无 APK，请先在本机下载一次");
-                    return;
-                }
                 AdbClient adb = new AdbClient(UpdateActivity.this, ip, port);
-                appendLog("连接 " + ip + ":" + port + "…");
                 adb.connect();
-                boolean installed = adb.isPackageInstalled("com.lanclip.sync");
-                if (installed) {
-                    appendLog(ip + " 已安装剪切板，跳过");
-                    adb.close();
-                    return;
-                }
-                byte[] bytes = readAllBytes(local);
-                appendLog("推送 " + local.getName() + " 到 " + ip + "…");
-                String result = adb.install(bytes, "com.lanclip.sync");
-                appendLog(ip + " 安装结果：" + result.trim());
                 adb.close();
+                connected = endpoint;
+                connectedIp = ip;
+                connectedPort = port;
+                remoteVersion = null;
+                ui.post(() -> {
+                    tvConnected.setText("已连接：" + endpoint);
+                    tvRemoteVer.setText("被控端版本：-（点「检测被控端版本」）");
+                    appendLog("已连接 " + endpoint);
+                });
             } catch (Throwable t) {
-                appendLog("远程安装 " + ip + " 失败：" + t.getMessage());
+                ui.post(() -> {
+                    tvConnected.setText("连接失败：" + endpoint);
+                    appendLog("连接 " + endpoint + " 失败：" + t.getMessage());
+                });
             }
         });
     }
 
-    /** 从下载目录挑一个剪切板 APK（优先最新）。 */
+    // ---------- 检测被控端版本（ADB 读 versionName） ----------
+
+    private void checkRemoteVersion() {
+        if (connected == null) {
+            Toast.makeText(this, "先连接盒子", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        tvRemoteVer.setText("读取中…");
+        worker.execute(() -> {
+            AdbClient adb = null;
+            try {
+                adb = new AdbClient(UpdateActivity.this, connectedIp, connectedPort);
+                adb.connect();
+                String ver = readRemoteVersion(adb);
+                remoteVersion = ver;
+                ui.post(() -> {
+                    tvRemoteVer.setText("被控端版本：" + (ver == null ? "未安装" : ver));
+                    appendLog("被控端版本：" + (ver == null ? "未安装" : ver));
+                });
+            } catch (Throwable t) {
+                ui.post(() -> {
+                    tvRemoteVer.setText("读取失败：" + t.getMessage());
+                    appendLog("读被控端版本失败：" + t.getMessage());
+                });
+            } finally {
+                if (adb != null) {
+                    adb.close();
+                }
+            }
+        });
+    }
+
+    private String readRemoteVersion(AdbClient adb) throws Exception {
+        String out = adb.shell("dumpsys package " + SELF_PACKAGE);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("versionName=([0-9.]+)").matcher(out);
+        if (m.find()) {
+            return m.group(1);
+        }
+        // 未找到可能未安装
+        String pkgs = adb.shell("pm list packages " + SELF_PACKAGE);
+        return pkgs.contains("package:" + SELF_PACKAGE) ? "?" : null;
+    }
+
+    // ---------- 下载 APK 到本机 ----------
+
+    private void downloadApk() {
+        btnDownload.setEnabled(false);
+        tvConnected.setText("下载剪切板 APK…");
+        worker.execute(() -> {
+            try {
+                UpdateClient.ReleaseInfo rel = new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).latest();
+                if (!rel.hasApk()) {
+                    ui.post(() -> tvConnected.setText("远程无 APK"));
+                    btnDownload.setEnabled(true);
+                    return;
+                }
+                File apk = UpdateClient.download(UpdateActivity.this, rel.apkUrl, "LanClipboard.apk",
+                        (done, total) -> ui.post(() -> tvConnected.setText("下载 " + pct(done, total))));
+                ui.post(() -> {
+                    tvConnected.setText("已下载：" + apk.getName() + "（可推送安装）");
+                    appendLog("已下载 " + rel.version + " 到本机");
+                });
+            } catch (Throwable t) {
+                ui.post(() -> {
+                    tvConnected.setText("下载失败：" + t.getMessage());
+                    appendLog("下载失败：" + t.getMessage());
+                });
+            } finally {
+                btnDownload.setEnabled(true);
+            }
+        });
+    }
+
+    // ---------- 推送安装到已连接盒子 ----------
+
+    private void pushInstall() {
+        if (connected == null) {
+            Toast.makeText(this, "先连接盒子", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        btnInstall.setEnabled(false);
+        worker.execute(() -> {
+            AdbClient adb = null;
+            try {
+                File local = pickLocalApk();
+                if (local == null) {
+                    ui.post(() -> appendLog("本地无 APK，请先下载一次"));
+                    return;
+                }
+                adb = new AdbClient(UpdateActivity.this, connectedIp, connectedPort);
+                adb.connect();
+                boolean installed = adb.isPackageInstalled(SELF_PACKAGE);
+                if (installed && remoteVersion == null) {
+                    // 尝试读版本
+                    remoteVersion = readRemoteVersion(adb);
+                }
+                byte[] bytes = readAllBytes(local);
+                appendLog("推送 " + local.getName() + " 到 " + connected + "…");
+                String result = adb.install(bytes, SELF_PACKAGE);
+                appendLog("安装结果：" + result.trim());
+            } catch (Throwable t) {
+                ui.post(() -> appendLog("推送失败：" + t.getMessage()));
+            } finally {
+                if (adb != null) {
+                    adb.close();
+                }
+                ui.post(() -> btnInstall.setEnabled(true));
+            }
+        });
+    }
+
     private File pickLocalApk() {
         File dir = getExternalFilesDir("downloads");
         if (dir == null) {

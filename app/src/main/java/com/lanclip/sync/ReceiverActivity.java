@@ -63,8 +63,6 @@ public class ReceiverActivity extends Activity {
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         btnToggle.setOnClickListener(v -> toggleService());
         findViewById(R.id.btn_access).setOnClickListener(v -> openAccessibilitySettings());
-        findViewById(R.id.btn_update).setOnClickListener(v ->
-                startActivity(new Intent(this, UpdateActivity.class)));
         // 遥控器：进入页面即聚焦主按钮，避免某些机顶盒没有默认焦点
         btnToggle.requestFocus();
 
