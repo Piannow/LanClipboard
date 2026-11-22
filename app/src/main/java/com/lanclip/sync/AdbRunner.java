@@ -28,10 +28,16 @@ public final class AdbRunner {
     private final Context ctx;
     private File adbFile;   // 解压后的 adb 可执行文件
     private final String serial;  // "ip:port"
+    private volatile String lastOutput = "";  // 最近一次 adb 命令的原始输出
 
     public AdbRunner(Context ctx, String host, int port) {
         this.ctx = ctx;
         this.serial = host + ":" + port;
+    }
+
+    /** 最近一次 adb 命令的原始输出（诊断用）。 */
+    public String lastOutput() {
+        return lastOutput;
     }
 
     /**
@@ -67,20 +73,21 @@ public final class AdbRunner {
         return out;
     }
 
-    /** 连接盒子。 */
+    /** 连接盒子。adb connect 不带 -s，直接连 host:port。 */
     public boolean connect() throws Exception {
-        String out = run("connect", serial);
-        return out != null && (out.contains("connected") || out.contains("already connected") || out.contains("connected to"));
+        String out = runRaw("connect", serial);
+        // 官方 adb connect 成功会输出 "connected to <host>:<port>" 或 "already connected to ..."
+        return out != null && (out.contains("connected to") || out.contains("already connected"));
     }
 
     /** 断开。 */
     public void disconnect() throws Exception {
-        run("disconnect", serial);
+        runRaw("disconnect", serial);
     }
 
-    /** 执行 shell 命令，返回 stdout。 */
+    /** 执行 shell 命令（已连接的盒子），返回 stdout。 */
     public String shell(String command) throws Exception {
-        return run("shell", command);
+        return runSerial("shell", command);
     }
 
     /** 检查盒子是否已安装指定包。 */
@@ -98,17 +105,26 @@ public final class AdbRunner {
 
     /** 安装 APK 到盒子。 */
     public String install(String localApkPath) throws Exception {
-        return run("install", "-r", localApkPath);
+        return runSerial("install", "-r", localApkPath);
     }
 
-    /** 执行 adb 命令。 */
-    private String run(String... args) throws Exception {
+    /** 不带 -s 的 adb 命令（connect/disconnect/start-server）。 */
+    private String runRaw(String... args) throws Exception {
         File adb = ensureBinary();
+        execCmd(adb, null, "start-server");
         List<String> cmd = new ArrayList<>();
         cmd.add(adb.getAbsolutePath());
-        cmd.add("start-server");          // 确保 server 起来
-        exec(cmd);
-        cmd.clear();
+        for (String a : args) {
+            cmd.add(a);
+        }
+        return exec(cmd);
+    }
+
+    /** 带 -s <serial> 的 adb 命令（shell/install/等，需要先 connect）。 */
+    private String runSerial(String... args) throws Exception {
+        File adb = ensureBinary();
+        execCmd(adb, null, "start-server");
+        List<String> cmd = new ArrayList<>();
         cmd.add(adb.getAbsolutePath());
         cmd.add("-s");
         cmd.add(serial);
@@ -116,6 +132,15 @@ public final class AdbRunner {
             cmd.add(a);
         }
         return exec(cmd);
+    }
+
+    private void execCmd(File adb, String unused, String... args) throws Exception {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(adb.getAbsolutePath());
+        for (String a : args) {
+            cmd.add(a);
+        }
+        exec(cmd);
     }
 
     private String exec(List<String> cmd) throws Exception {
@@ -138,7 +163,8 @@ public final class AdbRunner {
             Log.w(TAG, "adb 命令超时: " + cmd);
         }
         in.close();
-        return new String(bos.toByteArray(), "UTF-8");
+        lastOutput = new String(bos.toByteArray(), "UTF-8");
+        return lastOutput;
     }
 
     private AdbRunner() {

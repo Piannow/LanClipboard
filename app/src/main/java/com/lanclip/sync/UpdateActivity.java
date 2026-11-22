@@ -1,6 +1,9 @@
 package com.lanclip.sync;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -86,7 +89,26 @@ public class UpdateActivity extends Activity {
         btnCheckRemote.setOnClickListener(v -> checkRemoteVersion());
         btnDownload.setOnClickListener(v -> downloadApk());
         btnInstall.setOnClickListener(v -> pushInstall());
+        findViewById(R.id.btn_copy_log).setOnClickListener(v -> copyLog());
         findViewById(R.id.btn_scan).requestFocus();
+    }
+
+    /** 一键复制运行日志（含 adb 原始输出）到剪贴板。 */
+    private void copyLog() {
+        String text = logBuffer.toString().trim();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "日志为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("LanClipboardLog", text));
+                Toast.makeText(this, "日志已复制", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Throwable t) {
+            Toast.makeText(this, "复制失败：" + t.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ---------- 扫描并列出 ----------
@@ -142,6 +164,7 @@ public class UpdateActivity extends Activity {
             try {
                 AdbRunner runner = new AdbRunner(UpdateActivity.this, ip, port);
                 boolean ok = runner.connect();
+                String adbOut = runner.lastOutput();
                 runner.disconnect();
                 if (ok) {
                     connected = endpoint;
@@ -154,9 +177,13 @@ public class UpdateActivity extends Activity {
                         appendLog("已连接 " + endpoint);
                     });
                 } else {
+                    final String out = adbOut == null ? "" : adbOut.trim();
                     ui.post(() -> {
                         tvConnected.setText("连接失败：" + endpoint);
-                        appendLog("连接 " + endpoint + " 失败（adb connect 未成功）");
+                        appendLog("连接 " + endpoint + " 失败：adb connect 未成功");
+                        if (!out.isEmpty()) {
+                            appendLog("【adb 输出】" + out);
+                        }
                     });
                 }
             } catch (Throwable t) {
