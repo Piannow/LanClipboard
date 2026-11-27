@@ -99,7 +99,8 @@ public class FloatingButtonService extends Service {
                             return true;
                         }
                         if (held >= 600) {
-                            // 长按：退出悬浮球
+                            // 长按：先关闭自动同步，再退出悬浮球
+                            stopAutoSync();
                             stopSelf();
                         } else {
                             // 点击：切换自动同步
@@ -128,6 +129,16 @@ public class FloatingButtonService extends Service {
         bubble.setBackground(shape);
         bubble.setTextColor(running ? Color.parseColor("#052E16") : Color.WHITE);
         bubble.setText(running ? "同步中" : "已停止");
+    }
+
+    /** 停止自动同步（关服务 + 清开关 + 清状态）。 */
+    private void stopAutoSync() {
+        try {
+            getSharedPreferences(Util.PREFS, MODE_PRIVATE).edit()
+                    .putBoolean("autosync", false).apply();
+            startService(new Intent(this, SenderService.class).setAction("STOP"));
+        } catch (Throwable ignored) {
+        }
     }
 
     private void toggleAutoSync() {
@@ -181,6 +192,8 @@ public class FloatingButtonService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        // 悬浮球消失时确保自动同步一并停止
+        stopAutoSync();
         try {
             if (bubble != null && windowManager != null) {
                 windowManager.removeView(bubble);
