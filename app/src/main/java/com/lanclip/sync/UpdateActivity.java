@@ -484,17 +484,11 @@ public class UpdateActivity extends Activity {
                 .setTitle("删除 APK")
                 .setMessage("确定删除？\n\n" + apk.getName() + "\n" + sizeText(apk.length()))
                 .setPositiveButton("删除", (d, w) -> {
-                    boolean ok;
-                    try {
-                        ok = apk.delete();
-                    } catch (Throwable t) {
-                        ok = false;
-                    }
+                    boolean ok = UpdateClient.deleteApkWithResidue(UpdateActivity.this, apk);
                     if (ok) {
                         appendLog("已删除：" + apk.getName());
                         Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
                         versionAdapter.notifyDataSetChanged();
-                        openApkFolder();
                     } else {
                         appendLog("删除失败：" + apk.getName());
                         Toast.makeText(this, "删除失败（文件可能被占用）", Toast.LENGTH_SHORT).show();

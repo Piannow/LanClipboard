@@ -273,7 +273,13 @@ public final class UpdateClient {
         writeSegments(segFile, segPos);
 
         if (part.length() < total) {
-            throw new IOException("下载不完整：" + part.length() + "/" + total);
+            // 段下载失败导致不完整：清理残留，下次从头下载，避免续传位置错乱
+            try { raf.close(); } catch (Throwable ignored) {}
+            //noinspection ResultOfMethodCallIgnored
+            part.delete();
+            //noinspection ResultOfMethodCallIgnored
+            segFile.delete();
+            throw new IOException("下载不完整：" + part.length() + "/" + total + "，已清理残留，请重试");
         }
         // 完成后清理断点信息
         if (segFile.exists()) {
@@ -397,6 +403,25 @@ public final class UpdateClient {
         in.close();
         conn.disconnect();
         return out;
+    }
+
+    /** 删除指定 APK 及其 .part/.seg 残留文件。 */
+    public static boolean deleteApkWithResidue(Context ctx, File apk) {
+        boolean ok;
+        try {
+            ok = apk.delete();
+        } catch (Throwable t) {
+            ok = false;
+        }
+        File dir = apk.getParentFile();
+        if (dir != null) {
+            String name = apk.getName();
+            //noinspection ResultOfMethodCallIgnored
+            new File(dir, name + ".part").delete();
+            //noinspection ResultOfMethodCallIgnored
+            new File(dir, name + ".seg").delete();
+        }
+        return ok;
     }
 
     private static void rename(File from, File to) {
