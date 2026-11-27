@@ -98,19 +98,28 @@ public class UpdateActivity extends Activity {
         findViewById(R.id.btn_list_versions).setOnClickListener(v -> loadVersions());
 
         versionAdapter = new ArrayAdapter<UpdateClient.ReleaseInfo>(this,
-                android.R.layout.simple_list_item_2, android.R.id.text1, versions) {
+                R.layout.item_version, versions) {
             @Override
             public View getView(int position, View convertView, ViewGroup parent) {
-                View v = super.getView(position, convertView, parent);
+                View v = convertView;
+                if (v == null) {
+                    v = getLayoutInflater().inflate(R.layout.item_version, parent, false);
+                }
                 UpdateClient.ReleaseInfo r = versions.get(position);
-                TextView t1 = v.findViewById(android.R.id.text1);
-                TextView t2 = v.findViewById(android.R.id.text2);
+                TextView t1 = v.findViewById(R.id.item_title);
+                TextView t2 = v.findViewById(R.id.item_sub);
+                Button del = v.findViewById(R.id.item_delete);
                 t1.setText(r.version + "    " + r.apkName);
-                t1.setTextSize(16);
-                boolean has = localApkFor(r).exists();
-                t2.setText(has ? "已下载 · 点此推送到盒子" : "未下载 · 点此下载 (" + sizeText(r.sizeBytes) + ")");
-                t2.setTextSize(12);
+                final File f = localApkFor(r);
+                boolean has = f.exists() && f.length() > 0;
+                t2.setText(has ? "已下载 · 点此行推送到盒子" : "未下载 · 点此行下载 (" + sizeText(r.sizeBytes) + ")");
                 t2.setTextColor(getResources().getColor(has ? R.color.accent : R.color.dim));
+                if (has) {
+                    del.setVisibility(View.VISIBLE);
+                    del.setOnClickListener(view -> confirmDeleteApk(f));
+                } else {
+                    del.setVisibility(View.GONE);
+                }
                 return v;
             }
         };
