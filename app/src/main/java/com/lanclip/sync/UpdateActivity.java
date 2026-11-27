@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 盒子管理（手机端）：扫描局域网 → 点选连接盒子 → 检测被控端版本 → 下载 APK 推送安装。
@@ -350,19 +351,34 @@ public class UpdateActivity extends Activity {
         List<String> ips = Util.localIpv4();
         if (ips.isEmpty()) {
             tvDevices.setText("未连接局域网（没有可用 IP）");
-            appendLog("扫描失败：本机没有局域网 IP，请检查 WiFi/网线");
+            appendLog("扫描失败：本机没有局域网 IP");
             Toast.makeText(this, "未连接局域网", Toast.LENGTH_LONG).show();
             return;
         }
-        final String myIp = ips.get(0);
-        tvDevices.setText("扫描中… 本机 " + myIp);
+        tvDevices.setText("扫描中… 本机 " + android.text.TextUtils.join(" / ", ips));
         endpoints.clear();
         adapter.notifyDataSetChanged();
+
         String manual = etPort.getText() == null ? "" : etPort.getText().toString().trim();
-        appendLog("扫描 " + myIp + " 所在网段的 adb 端口…");
+        final int manualPort;
+        if (manual.isEmpty()) {
+            manualPort = 0;
+        } else {
+            try {
+                manualPort = Integer.parseInt(manual);
+            } catch (Throwable t) {
+                tvDevices.setText("端口格式错误");
+                return;
+            }
+        }
+        appendLog("本机 IP：" + android.text.TextUtils.join(" / ", ips));
+        appendLog("开始扫描 adb 端口" + (manualPort > 0 ? "（仅 " + manualPort + "）" : "（5555-5585）"));
 
         final long startMs = System.currentTimeMillis();
-        AdbScan.Listener listener = new AdbScan.Listener() {
+        final AtomicInteger doneCount = new AtomicInteger(0);
+        final int totalNets = ips.size();
+
+        final AdbScan.Listener listener = new AdbScan.Listener() {
             @Override
             public void onFound(final String endpoint) {
                 ui.post(() -> {
@@ -376,27 +392,48 @@ public class UpdateActivity extends Activity {
 
             @Override
             public void onDone(final int total) {
+                // 所有网段都扫完才汇总
+                if (doneCount.incrementAndGet() < totalNets) {
+                    return;
+                }
                 ui.post(() -> {
                     long cost = (System.currentTimeMillis() - startMs) / 1000;
-                    if (total > 0) {
-                        tvDevices.setText("找到 " + total + " 个盒子（耗时 " + cost + "s），点选连接");
+                    int n = endpoints.size();
+                    if (n > 0) {
+                        tvDevices.setText("找到 " + n + " 个盒子（耗时 " + cost + "s），点选连接");
                     } else {
-                        tvDevices.setText("未发现 adb 设备（耗时 " + cost + "s）\n"
-                                + "请确认：盒子已开无线调试、与手机同一网段、未被路由器隔离");
+                        tvDevices.setText("未发现 adb 设备（扫描了 " + totalNets + " 个网段，耗时 " + cost + "s）"
+                                + "\n请确认盒子已开无线调试，并在盒子设置里查看其 IP");
                     }
-                    appendLog("扫描完成：找到 " + total + " 个（耗时 " + cost + "s）");
+                    appendLog("扫描完成：找到 " + n + " 个（耗时 " + cost + "s）");
                 });
             }
         };
-        if (manual.isEmpty()) {
-            AdbScan.scan(myIp, listener);
-        } else {
-            try {
-                int port = Integer.parseInt(manual);
-                appendLog("只扫描端口 " + port);
-                AdbScan.scanPort(myIp, port, listener);
-            } catch (Throwable t) {
-                tvDevices.setText("端口格式错误");
+
+        // mDNS 发现随机端口（Android 11+ 无线调试）
+        AdbMdns.discover(this, new AdbMdns.Listener() {
+            @Override
+            public void onFound(final String endpoint) {
+                ui.post(() -> {
+                    if (!endpoints.contains(endpoint)) {
+                        endpoints.add(endpoint);
+                        adapter.notifyDataSetChanged();
+                        appendLog("mDNS 发现 " + endpoint);
+                    }
+                });
+            }
+
+            @Override
+            public void onDone() {
+            }
+        });
+
+        // 对每一个本机网段都扫一遍
+        for (String ip : ips) {
+            if (manualPort > 0) {
+                AdbScan.scanPort(ip, manualPort, listener);
+            } else {
+                AdbScan.scan(ip, listener);
             }
         }
     }
