@@ -714,7 +714,7 @@ public class UpdateActivity extends Activity {
                     new android.content.IntentFilter(PushService.ACTION_PUSH));
         } catch (Throwable ignored) {
         }
-        // 恢复上次的连接（切页面/重进不丢）
+        // 恢复上次的连接信息（只恢复状态，不在这里重连以免干扰扫描）
         if (connected == null) {
             android.content.SharedPreferences sp = getSharedPreferences(Util.PREFS, MODE_PRIVATE);
             String ep = sp.getString("adb_endpoint", "");
@@ -723,17 +723,8 @@ public class UpdateActivity extends Activity {
                 connectedIp = sp.getString("adb_ip", "");
                 connectedPort = sp.getInt("adb_port", 5555);
                 if (tvConnected != null) {
-                    tvConnected.setText("已连接：" + ep);
+                    tvConnected.setText("已连接：" + ep + "（推送前会自动重连）");
                 }
-                // 后台重新建立连接（adb connect 幂等）
-                final String ip = connectedIp;
-                final int port = connectedPort;
-                worker.execute(() -> {
-                    try {
-                        new AdbRunner(UpdateActivity.this, ip, port).connect();
-                    } catch (Throwable ignored) {
-                    }
-                });
             }
         }
         // 视图可能尚未就绪，做空值保护，避免 NPE 导致页面异常
