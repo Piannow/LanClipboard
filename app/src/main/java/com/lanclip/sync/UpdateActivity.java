@@ -1,9 +1,13 @@
 package com.lanclip.sync;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -210,32 +214,44 @@ public class UpdateActivity extends Activity {
     }
 
     private void downloadVersion(final UpdateClient.ReleaseInfo r) {
-        final String key = r.version;
-        if (downloading.containsKey(key)) {
-            Toast.makeText(this, "正在下载…", Toast.LENGTH_SHORT).show();
+        if (DownloadService.isDownloading(r.version)) {
+            Toast.makeText(this, "正在下载 " + r.version + "…", Toast.LENGTH_SHORT).show();
             return;
         }
-        downloading.put(key, "1");
         tvVerStatus.setText("下载 " + r.version + "…");
-        worker.execute(() -> {
-            try {
-                File apk = UpdateClient.download(this, r.apkUrl, localName(r), (done, total) ->
-                        ui.post(() -> tvVerStatus.setText("下载 " + r.version + " " + pct(done, total))));
-                ui.post(() -> {
-                    downloading.remove(key);
-                    versionAdapter.notifyDataSetChanged();
-                    tvVerStatus.setText(r.version + " 已下载：" + apk.getName() + "（点此项推送到盒子）");
-                    appendLog("已下载 " + r.version);
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    downloading.remove(key);
-                    tvVerStatus.setText("下载失败：" + t.getMessage());
-                    appendLog("下载 " + r.version + " 失败：" + t.getMessage());
-                });
-            }
-        });
+        appendLog("开始下载 " + r.version);
+        Intent svc = new Intent(this, DownloadService.class)
+                .putExtra(DownloadService.EXTRA_URL, r.apkUrl)
+                .putExtra(DownloadService.EXTRA_NAME, localName(r))
+                .putExtra(DownloadService.EXTRA_VERSION, r.version);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
     }
+
+    /** 下载进度广播接收器。 */
+    private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String version = intent.getStringExtra("version");
+            int pct = intent.getIntExtra("pct", -1);
+            String done = intent.getStringExtra("done");
+            if (done != null) {
+                if (done.startsWith("失败")) {
+                    tvVerStatus.setText(version + " " + done);
+                    appendLog("下载 " + version + " " + done);
+                } else {
+                    tvVerStatus.setText(version + " 已下载，可推送");
+                    appendLog("已下载 " + version + "：" + done);
+                }
+                versionAdapter.notifyDataSetChanged();
+            } else if (version != null) {
+                tvVerStatus.setText("下载 " + version + " " + (pct < 0 ? "" : pct + "%"));
+            }
+        }
+    };
 
     /** 弹出行操作：推送到盒子 / 安装到本机。 */
     private void showApkActions(final File f) {
@@ -258,7 +274,6 @@ public class UpdateActivity extends Activity {
             Toast.makeText(this, "文件不存在", Toast.LENGTH_SHORT).show();
             return;
         }
-        // 未连接时自动尝试连接最近扫描到的设备
         if (connected == null) {
             if (endpoints.isEmpty()) {
                 Toast.makeText(this, "请先扫描并连接盒子", Toast.LENGTH_SHORT).show();
@@ -270,28 +285,36 @@ public class UpdateActivity extends Activity {
             Toast.makeText(this, "正在连接盒子，请稍后再次点击推送", Toast.LENGTH_LONG).show();
             return;
         }
-        Toast.makeText(this, "正在推送到 " + connected + "…", Toast.LENGTH_SHORT).show();
+        if (PushService.isPushing(apk.getName())) {
+            Toast.makeText(this, "正在推送…", Toast.LENGTH_SHORT).show();
+            return;
+        }
         appendLog("推送 " + apk.getName() + " 到 " + connected + "…");
-        worker.execute(() -> {
-            AdbRunner runner = null;
-            try {
-                runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
-                String result = runner.install(apk.getAbsolutePath());
-                ui.post(() -> {
-                    appendLog("安装结果：" + result.trim());
-                    boolean ok = result.contains("Success");
-                    Toast.makeText(this, ok ? "推送安装成功" : "推送完成，见日志", Toast.LENGTH_SHORT).show();
-                });
-            } catch (Throwable t) {
-                final String msg = t.getMessage() == null ? t.toString() : t.getMessage();
-                ui.post(() -> {
-                    appendLog("推送失败：" + msg);
-                    Toast.makeText(this, "推送失败：" + msg, Toast.LENGTH_LONG).show();
-                });
-            }
-            // 注意：不要 disconnect，保持连接供后续操作
-        });
+        Toast.makeText(this, "正在推送（可切页面）…", Toast.LENGTH_SHORT).show();
+        Intent svc = new Intent(this, PushService.class)
+                .putExtra(PushService.EXTRA_APK, apk.getAbsolutePath())
+                .putExtra(PushService.EXTRA_HOST, connectedIp)
+                .putExtra(PushService.EXTRA_PORT, connectedPort)
+                .putExtra(PushService.EXTRA_LABEL, apk.getName());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
     }
+
+    /** 推送结果广播接收器。 */
+    private final BroadcastReceiver pushReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String apk = intent.getStringExtra("apk");
+            boolean ok = intent.getBooleanExtra("ok", false);
+            String text = intent.getStringExtra("text");
+            appendLog((ok ? "推送成功：" : "推送失败：") + apk + " " + (text == null ? "" : text));
+            Toast.makeText(UpdateActivity.this,
+                    ok ? ("推送成功：" + apk) : ("推送失败：" + text), Toast.LENGTH_LONG).show();
+        }
+    };
 
     /** 本地目录中的 APK 文件（按版本命名）。 */
     private File localApkFor(UpdateClient.ReleaseInfo r) {
@@ -651,7 +674,40 @@ public class UpdateActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            unregisterReceiver(downloadReceiver);
+        } catch (Throwable ignored) {
+        }
+        try {
+            unregisterReceiver(pushReceiver);
+        } catch (Throwable ignored) {
+        }
         worker.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 重新绑定下载进度（切页面回来仍能看到）
+        try {
+            registerReceiver(downloadReceiver,
+                    new android.content.IntentFilter(DownloadService.ACTION_DOWNLOAD));
+        } catch (Throwable ignored) {
+        }
+        try {
+            registerReceiver(pushReceiver,
+                    new android.content.IntentFilter(PushService.ACTION_PUSH));
+        } catch (Throwable ignored) {
+        }
+        // 恢复正在下载的进度
+        for (UpdateClient.ReleaseInfo r : versions) {
+            if (DownloadService.isDownloading(r.version)) {
+                Integer p = DownloadService.progressMap().get(r.version);
+                tvVerStatus.setText("下载 " + r.version + " " + (p == null || p < 0 ? "" : p + "%"));
+                break;
+            }
+        }
+        versionAdapter.notifyDataSetChanged();
     }
 }
