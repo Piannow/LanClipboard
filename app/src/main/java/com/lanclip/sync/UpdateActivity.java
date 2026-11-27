@@ -405,6 +405,12 @@ public class UpdateActivity extends Activity {
                     connectedIp = ip;
                     connectedPort = port;
                     remoteVersion = null;
+                    // 持久化连接信息，切页面回来后自动恢复
+                    getSharedPreferences(Util.PREFS, MODE_PRIVATE).edit()
+                            .putString("adb_endpoint", endpoint)
+                            .putString("adb_ip", ip)
+                            .putInt("adb_port", port)
+                            .apply();
                     ui.post(() -> {
                         tvConnected.setText("已连接：" + endpoint);
                         tvRemoteVer.setText("被控端版本：-（点「检测被控端版本」）");
@@ -707,6 +713,28 @@ public class UpdateActivity extends Activity {
             registerReceiver(pushReceiver,
                     new android.content.IntentFilter(PushService.ACTION_PUSH));
         } catch (Throwable ignored) {
+        }
+        // 恢复上次的连接（切页面/重进不丢）
+        if (connected == null) {
+            android.content.SharedPreferences sp = getSharedPreferences(Util.PREFS, MODE_PRIVATE);
+            String ep = sp.getString("adb_endpoint", "");
+            if (!ep.isEmpty()) {
+                connected = ep;
+                connectedIp = sp.getString("adb_ip", "");
+                connectedPort = sp.getInt("adb_port", 5555);
+                if (tvConnected != null) {
+                    tvConnected.setText("已连接：" + ep);
+                }
+                // 后台重新建立连接（adb connect 幂等）
+                final String ip = connectedIp;
+                final int port = connectedPort;
+                worker.execute(() -> {
+                    try {
+                        new AdbRunner(UpdateActivity.this, ip, port).connect();
+                    } catch (Throwable ignored) {
+                    }
+                });
+            }
         }
         // 视图可能尚未就绪，做空值保护，避免 NPE 导致页面异常
         if (versionAdapter == null || tvVerStatus == null) {
