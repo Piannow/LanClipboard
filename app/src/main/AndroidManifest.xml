@@ -11,6 +11,10 @@
     <!-- 存储：下载 APK 到外部存储（兼容 Android 4.4-9；10+ 走 scoped storage） -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- 悬浮球：在其他应用上层显示 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 后台保活：息屏/切后台时保持剪贴板轮询 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- 机顶盒 / TV：无触摸屏也必须能安装，遥控器方向键可操作 -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -66,6 +70,11 @@
 
         <service
             android:name=".SenderService"
+            android:exported="false" />
+
+        <!-- 悬浮球：一键开始/停止自动同步 -->
+        <service
+            android:name=".FloatingButtonService"
             android:exported="false" />
 
         <service

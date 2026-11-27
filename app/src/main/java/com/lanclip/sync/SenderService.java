@@ -33,6 +33,7 @@ public class SenderService extends Service {
     private volatile String lastSent = "";
     private String status = "等待剪切板变化";
     private boolean ticking;
+    private android.os.PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -42,6 +43,20 @@ public class SenderService extends Service {
         startForeground(NOTIFICATION_ID, buildNotification(status));
         network = Executors.newSingleThreadExecutor();
         lastSent = Util.getClipText(this);
+        acquireWakeLock();
+    }
+
+    /** 息屏/切后台时保持 CPU 唤醒，避免剪贴板轮询被冻结。 */
+    private void acquireWakeLock() {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "LanClipboard:sender");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire();
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -169,6 +184,13 @@ public class SenderService extends Service {
         if (network != null) {
             network.shutdownNow();
         }
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Throwable ignored) {
+        }
+        wakeLock = null;
         stopForeground(true);
         broadcast("自动同步已停止");
         super.onDestroy();

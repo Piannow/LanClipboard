@@ -184,6 +184,23 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_floating"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_btn_secondary"
+                android:text="开启悬浮球（一键开始/停止）"
+                android:textColor="@color/text"
+                android:textSize="14sp" />
+
+            <TextView
+                style="@style/Hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="悬浮球：点一下开始/停止同步，长按退出。绿色=运行中，红色=已停止。需授权「在其他应用上层显示」。" />
         </LinearLayout>
 
         <LinearLayout
