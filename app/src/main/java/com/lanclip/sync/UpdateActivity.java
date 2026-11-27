@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 盒子管理（手机端）：扫描局域网 → 点选连接盒子 → 检测被控端版本 → 下载 APK 推送安装。
@@ -232,28 +231,6 @@ public class UpdateActivity extends Activity {
         }
     }
 
-    /** 下载进度广播接收器。 */
-    private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String version = intent.getStringExtra("version");
-            int pct = intent.getIntExtra("pct", -1);
-            String done = intent.getStringExtra("done");
-            if (done != null) {
-                if (done.startsWith("失败")) {
-                    tvVerStatus.setText(version + " " + done);
-                    appendLog("下载 " + version + " " + done);
-                } else {
-                    tvVerStatus.setText(version + " 已下载，可推送");
-                    appendLog("已下载 " + version + "：" + done);
-                }
-                versionAdapter.notifyDataSetChanged();
-            } else if (version != null) {
-                tvVerStatus.setText("下载 " + version + " " + (pct < 0 ? "" : pct + "%"));
-            }
-        }
-    };
-
     /** 弹出行操作：推送到盒子 / 安装到本机。 */
     private void showApkActions(final File f) {
         new android.app.AlertDialog.Builder(this)
@@ -278,12 +255,10 @@ public class UpdateActivity extends Activity {
         if (connected == null) {
             if (endpoints.isEmpty()) {
                 Toast.makeText(this, "请先扫描并连接盒子", Toast.LENGTH_SHORT).show();
-                appendLog("推送失败：尚未连接盒子");
                 return;
             }
-            appendLog("尚未连接，自动连接 " + endpoints.get(0) + "…");
             connectDevice(endpoints.get(0));
-            Toast.makeText(this, "正在连接盒子，请稍后再次点击推送", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "正在连接，请稍后再点推送", Toast.LENGTH_LONG).show();
             return;
         }
         if (PushService.isPushing(apk.getName())) {
@@ -303,19 +278,6 @@ public class UpdateActivity extends Activity {
             startService(svc);
         }
     }
-
-    /** 推送结果广播接收器。 */
-    private final BroadcastReceiver pushReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String apk = intent.getStringExtra("apk");
-            boolean ok = intent.getBooleanExtra("ok", false);
-            String text = intent.getStringExtra("text");
-            appendLog((ok ? "推送成功：" : "推送失败：") + apk + " " + (text == null ? "" : text));
-            Toast.makeText(UpdateActivity.this,
-                    ok ? ("推送成功：" + apk) : ("推送失败：" + text), Toast.LENGTH_LONG).show();
-        }
-    };
 
     /** 本地目录中的 APK 文件（按版本命名）。 */
     private File localApkFor(UpdateClient.ReleaseInfo r) {
@@ -348,92 +310,41 @@ public class UpdateActivity extends Activity {
     // ---------- 扫描并列出 ----------
 
     private void scanLan() {
-        List<String> ips = Util.localIpv4();
-        if (ips.isEmpty()) {
-            tvDevices.setText("未连接局域网（没有可用 IP）");
-            appendLog("扫描失败：本机没有局域网 IP");
-            Toast.makeText(this, "未连接局域网", Toast.LENGTH_LONG).show();
-            return;
-        }
-        tvDevices.setText("扫描中… 本机 " + android.text.TextUtils.join(" / ", ips));
+        tvDevices.setText("扫描中…");
         endpoints.clear();
         adapter.notifyDataSetChanged();
-
-        String manual = etPort.getText() == null ? "" : etPort.getText().toString().trim();
-        final int manualPort;
-        if (manual.isEmpty()) {
-            manualPort = 0;
-        } else {
-            try {
-                manualPort = Integer.parseInt(manual);
-            } catch (Throwable t) {
-                tvDevices.setText("端口格式错误");
-                return;
-            }
+        List<String> ips = Util.localIpv4();
+        if (ips.isEmpty()) {
+            tvDevices.setText("未连接局域网");
+            return;
         }
-        appendLog("本机 IP：" + android.text.TextUtils.join(" / ", ips));
-        appendLog("开始扫描 adb 端口" + (manualPort > 0 ? "（仅 " + manualPort + "）" : "（5555-5585）"));
-
-        final long startMs = System.currentTimeMillis();
-        final AtomicInteger doneCount = new AtomicInteger(0);
-        final int totalNets = ips.size();
-
-        final AdbScan.Listener listener = new AdbScan.Listener() {
+        final String myIp = ips.get(0);
+        String manual = etPort.getText() == null ? "" : etPort.getText().toString().trim();
+        appendLog("扫描 " + myIp + " 所在网段…");
+        AdbScan.Listener listener = new AdbScan.Listener() {
             @Override
             public void onFound(final String endpoint) {
                 ui.post(() -> {
                     if (!endpoints.contains(endpoint)) {
                         endpoints.add(endpoint);
                         adapter.notifyDataSetChanged();
-                        appendLog("发现 " + endpoint);
                     }
                 });
             }
 
             @Override
             public void onDone(final int total) {
-                // 所有网段都扫完才汇总
-                if (doneCount.incrementAndGet() < totalNets) {
-                    return;
-                }
-                ui.post(() -> {
-                    long cost = (System.currentTimeMillis() - startMs) / 1000;
-                    int n = endpoints.size();
-                    if (n > 0) {
-                        tvDevices.setText("找到 " + n + " 个盒子（耗时 " + cost + "s），点选连接");
-                    } else {
-                        tvDevices.setText("未发现 adb 设备（扫描了 " + totalNets + " 个网段，耗时 " + cost + "s）"
-                                + "\n请确认盒子已开无线调试，并在盒子设置里查看其 IP");
-                    }
-                    appendLog("扫描完成：找到 " + n + " 个（耗时 " + cost + "s）");
-                });
+                ui.post(() -> tvDevices.setText("找到 " + total + " 个盒子，点选连接"));
             }
         };
-
-        // mDNS 发现随机端口（Android 11+ 无线调试）
-        AdbMdns.discover(this, new AdbMdns.Listener() {
-            @Override
-            public void onFound(final String endpoint) {
-                ui.post(() -> {
-                    if (!endpoints.contains(endpoint)) {
-                        endpoints.add(endpoint);
-                        adapter.notifyDataSetChanged();
-                        appendLog("mDNS 发现 " + endpoint);
-                    }
-                });
-            }
-
-            @Override
-            public void onDone() {
-            }
-        });
-
-        // 对每一个本机网段都扫一遍
-        for (String ip : ips) {
-            if (manualPort > 0) {
-                AdbScan.scanPort(ip, manualPort, listener);
-            } else {
-                AdbScan.scan(ip, listener);
+        if (manual.isEmpty()) {
+            AdbScan.scan(myIp, listener);
+        } else {
+            try {
+                int port = Integer.parseInt(manual);
+                AdbScan.scanPort(myIp, port, listener);
+            } catch (Throwable t) {
+                tvDevices.setText("端口格式错误");
             }
         }
     }
@@ -457,7 +368,6 @@ public class UpdateActivity extends Activity {
                     connectedIp = ip;
                     connectedPort = port;
                     remoteVersion = null;
-                    // 持久化连接信息，切页面回来后自动恢复
                     getSharedPreferences(Util.PREFS, MODE_PRIVATE).edit()
                             .putString("adb_endpoint", endpoint)
                             .putString("adb_ip", ip)
@@ -730,43 +640,52 @@ public class UpdateActivity extends Activity {
         tvLog.setText("运行日志：\n" + sb.toString().trim());
     }
 
-    @Override
-    protected void onDestroy() {
-        try {
-            unregisterReceiver(downloadReceiver);
-        } catch (Throwable ignored) {
+    /** 下载进度广播。 */
+    private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String version = intent.getStringExtra("version");
+            int pct = intent.getIntExtra("pct", -1);
+            String done = intent.getStringExtra("done");
+            if (done != null) {
+                if (done.startsWith("失败")) {
+                    tvVerStatus.setText(version + " " + done);
+                    appendLog("下载 " + version + " " + done);
+                } else {
+                    tvVerStatus.setText(version + " 已下载，可推送");
+                    appendLog("已下载 " + version + "：" + done);
+                }
+                versionAdapter.notifyDataSetChanged();
+            } else if (version != null) {
+                tvVerStatus.setText("下载 " + version + " " + (pct < 0 ? "" : pct + "%"));
+            }
         }
-        try {
-            unregisterReceiver(pushReceiver);
-        } catch (Throwable ignored) {
+    };
+
+    /** 推送结果广播。 */
+    private final BroadcastReceiver pushReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String apk = intent.getStringExtra("apk");
+            boolean ok = intent.getBooleanExtra("ok", false);
+            String text = intent.getStringExtra("text");
+            appendLog((ok ? "推送成功：" : "推送失败：") + apk + " " + (text == null ? "" : text));
+            Toast.makeText(UpdateActivity.this,
+                    ok ? ("推送成功：" + apk) : ("推送失败：" + text), Toast.LENGTH_LONG).show();
         }
-        worker.shutdownNow();
-        super.onDestroy();
-    }
+    };
 
     @Override
     protected void onResume() {
         super.onResume();
-        // 重新绑定下载/推送进度（切页面回来仍能看到）
+        try { unregisterReceiver(downloadReceiver); } catch (Throwable ignored) { }
+        try { unregisterReceiver(pushReceiver); } catch (Throwable ignored) { }
         try {
-            unregisterReceiver(downloadReceiver);
-        } catch (Throwable ignored) {
-        }
+            registerReceiver(downloadReceiver, new IntentFilter(DownloadService.ACTION_DOWNLOAD));
+        } catch (Throwable ignored) { }
         try {
-            unregisterReceiver(pushReceiver);
-        } catch (Throwable ignored) {
-        }
-        try {
-            registerReceiver(downloadReceiver,
-                    new android.content.IntentFilter(DownloadService.ACTION_DOWNLOAD));
-        } catch (Throwable ignored) {
-        }
-        try {
-            registerReceiver(pushReceiver,
-                    new android.content.IntentFilter(PushService.ACTION_PUSH));
-        } catch (Throwable ignored) {
-        }
-        // 恢复上次的连接信息（只恢复状态，不在这里重连以免干扰扫描）
+            registerReceiver(pushReceiver, new IntentFilter(PushService.ACTION_PUSH));
+        } catch (Throwable ignored) { }
         if (connected == null) {
             android.content.SharedPreferences sp = getSharedPreferences(Util.PREFS, MODE_PRIVATE);
             String ep = sp.getString("adb_endpoint", "");
@@ -775,24 +694,20 @@ public class UpdateActivity extends Activity {
                 connectedIp = sp.getString("adb_ip", "");
                 connectedPort = sp.getInt("adb_port", 5555);
                 if (tvConnected != null) {
-                    tvConnected.setText("已连接：" + ep + "（推送前会自动重连）");
+                    tvConnected.setText("已连接：" + ep);
                 }
             }
         }
-        // 视图可能尚未就绪，做空值保护，避免 NPE 导致页面异常
-        if (versionAdapter == null || tvVerStatus == null) {
-            return;
-        }
-        try {
-            for (UpdateClient.ReleaseInfo r : versions) {
-                if (DownloadService.isDownloading(r.version)) {
-                    Integer p = DownloadService.progressMap().get(r.version);
-                    tvVerStatus.setText("下载 " + r.version + " " + (p == null || p < 0 ? "" : p + "%"));
-                    break;
-                }
-            }
+        if (versionAdapter != null) {
             versionAdapter.notifyDataSetChanged();
-        } catch (Throwable ignored) {
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        try { unregisterReceiver(downloadReceiver); } catch (Throwable ignored) { }
+        try { unregisterReceiver(pushReceiver); } catch (Throwable ignored) { }
+        worker.shutdownNow();
+        super.onDestroy();
     }
 }
