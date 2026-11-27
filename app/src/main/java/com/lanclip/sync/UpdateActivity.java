@@ -494,7 +494,13 @@ public class UpdateActivity extends Activity {
         return (done * 100 / total) + "%";
     }
 
-    private void appendLog(String line) {
+    private void appendLog(final String line) {
+        // 可能在 worker 线程被调用：切回主线程再更新 View，避免
+        // "Only the original thread that created a view hierarchy can touch its views"
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            ui.post(() -> appendLog(line));
+            return;
+        }
         logBuffer.append(line).append('\n');
         String[] lines = logBuffer.toString().split("\n");
         StringBuilder sb = new StringBuilder();
