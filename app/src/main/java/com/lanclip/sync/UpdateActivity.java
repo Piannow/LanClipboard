@@ -449,33 +449,53 @@ public class UpdateActivity extends Activity {
             return;
         }
 
-        final CharSequence[] items = new CharSequence[apks.size()];
-        for (int i = 0; i < apks.size(); i++) {
-            File f = apks.get(i);
-            items[i] = f.getName() + "    " + sizeText(f.length());
+        // 自定义列表：每行直接带「删除」按钮，点行可推送/安装
+        final java.util.List<String> names = new java.util.ArrayList<>();
+        for (File f : apks) {
+            names.add(f.getName() + "\n" + sizeText(f.length()));
         }
-        new android.app.AlertDialog.Builder(this)
+        final android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<String>(
+                this, R.layout.item_version, R.id.item_title, names) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                View v = convertView;
+                if (v == null) {
+                    v = getLayoutInflater().inflate(R.layout.item_version, parent, false);
+                }
+                final File f = apks.get(position);
+                TextView t1 = v.findViewById(R.id.item_title);
+                TextView t2 = v.findViewById(R.id.item_sub);
+                Button del = v.findViewById(R.id.item_delete);
+                t1.setText(f.getName());
+                t2.setText(sizeText(f.length()) + "  ·  点此行推送/安装");
+                del.setVisibility(View.VISIBLE);
+                del.setOnClickListener(view -> {
+                    confirmDeleteApk(f);
+                    notifyDataSetChanged();
+                });
+                return v;
+            }
+        };
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
                 .setTitle("本地 APK（" + apks.size() + " 个）")
-                .setItems(items, (dialog, which) -> {
-                    File f = apks.get(which);
+                .setAdapter(ad, (dialog, which) -> {
+                    final File f = apks.get(which);
                     new android.app.AlertDialog.Builder(this)
                             .setTitle(f.getName())
                             .setMessage("路径：" + f.getAbsolutePath()
                                     + "\n大小：" + sizeText(f.length()))
-                            .setItems(new CharSequence[]{"推送到已连接盒子", "安装到本机手机", "删除该 APK"}, (dd, sel) -> {
+                            .setItems(new CharSequence[]{"推送到已连接盒子", "安装到本机手机"}, (dd, sel) -> {
                                 if (sel == 0) {
                                     pushLocalToBox(f);
-                                } else if (sel == 1) {
-                                    installLocalApk(f);
                                 } else {
-                                    confirmDeleteApk(f);
+                                    installLocalApk(f);
                                 }
                             })
                             .show();
                 })
                 .setNegativeButton("关闭", null)
-                .show();
-        appendLog("本地 APK：" + apks.size() + " 个（" + d.getAbsolutePath() + "）");
+                .create();
+        dlg.show();
     }
 
     /** 确认并删除本地 APK。 */
