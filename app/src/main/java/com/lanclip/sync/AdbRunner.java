@@ -75,6 +75,12 @@ public final class AdbRunner {
 
     /** 连接盒子。adb connect 不带 -s，直接连 host:port。 */
     public boolean connect() throws Exception {
+        File adb = ensureBinary();
+        // 先清理可能僵死的旧 server，避免 start-server 卡住导致“点了没反应”
+        try {
+            execWithTimeout(cmdOf(adb, "kill-server"), 5000);
+        } catch (Throwable ignored) {
+        }
         String out = runRaw("connect", serial);
         // 官方 adb connect 成功会输出 "connected to <host>:<port>" 或 "already connected to ..."
         return out != null && (out.contains("connected to") || out.contains("already connected"));
@@ -83,6 +89,15 @@ public final class AdbRunner {
     /** 断开。 */
     public void disconnect() throws Exception {
         runRaw("disconnect", serial);
+    }
+
+    private static List<String> cmdOf(File adb, String... args) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(adb.getAbsolutePath());
+        for (String a : args) {
+            cmd.add(a);
+        }
+        return cmd;
     }
 
     /** 执行 shell 命令（已连接的盒子），返回 stdout。 */
@@ -146,6 +161,10 @@ public final class AdbRunner {
     }
 
     private String exec(List<String> cmd) throws Exception {
+        return execWithTimeout(cmd, CMD_TIMEOUT_MS);
+    }
+
+    private String execWithTimeout(List<String> cmd, long timeoutMs) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         // HOME 指向应用私有目录，让 adb 生成/复用 ~/.android/adbkey
         pb.environment().put("HOME", ctx.getFilesDir().getAbsolutePath());
@@ -169,7 +188,7 @@ public final class AdbRunner {
         while ((n = in.read(buf)) != -1) {
             bos.write(buf, 0, n);
         }
-        boolean finished = p.waitFor(CMD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        boolean finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
         if (!finished) {
             p.destroy();
             Log.w(TAG, "adb 命令超时: " + cmd);

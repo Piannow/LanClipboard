@@ -48,7 +48,7 @@ public class UpdateActivity extends Activity {
     private final java.util.Map<String, String> downloading = new java.util.HashMap<>();
 
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService worker = Executors.newFixedThreadPool(3);
     private final StringBuilder logBuffer = new StringBuilder();
 
     private final List<String> endpoints = new ArrayList<>();
@@ -316,6 +316,7 @@ public class UpdateActivity extends Activity {
 
     private void connectDevice(final String endpoint) {
         tvDevices.setText("连接 " + endpoint + "…");
+        appendLog("开始连接 " + endpoint + "…");
         worker.execute(() -> {
             int ci = endpoint.lastIndexOf(':');
             final String ip = endpoint.substring(0, ci);
@@ -346,9 +347,10 @@ public class UpdateActivity extends Activity {
                     });
                 }
             } catch (Throwable t) {
+                final String msg = t.getMessage() == null ? t.toString() : t.getMessage();
                 ui.post(() -> {
                     tvConnected.setText("连接失败：" + endpoint);
-                    appendLog("连接 " + endpoint + " 失败：" + t.getMessage());
+                    appendLog("连接 " + endpoint + " 失败：" + msg);
                 });
             }
         });
