@@ -116,6 +116,16 @@ public class UpdateActivity extends Activity {
         };
         listVersions.setAdapter(versionAdapter);
         listVersions.setOnItemClickListener((parent, view, position, id) -> onVersionClick(versions.get(position)));
+        listVersions.setOnItemLongClickListener((parent, view, position, id) -> {
+            UpdateClient.ReleaseInfo r = versions.get(position);
+            final File f = localApkFor(r);
+            if (!f.exists()) {
+                Toast.makeText(this, "该版本未下载", Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            confirmDeleteApk(f);
+            return true;
+        });
 
         findViewById(R.id.btn_scan).requestFocus();
     }
@@ -475,6 +485,7 @@ public class UpdateActivity extends Activity {
                         appendLog("已删除：" + apk.getName());
                         Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
                         versionAdapter.notifyDataSetChanged();
+                        openApkFolder();
                     } else {
                         appendLog("删除失败：" + apk.getName());
                         Toast.makeText(this, "删除失败（文件可能被占用）", Toast.LENGTH_SHORT).show();
