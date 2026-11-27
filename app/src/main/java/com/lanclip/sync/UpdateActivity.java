@@ -422,21 +422,10 @@ public class UpdateActivity extends Activity {
             dir.mkdirs();
         }
         final File d = dir;
-        File[] files = dir.listFiles();
+
+        // 实时数据源：始终以磁盘为准
         final java.util.List<File> apks = new java.util.ArrayList<>();
-        if (files != null) {
-            for (File f : files) {
-                if (f.isFile() && f.getName().toLowerCase().endsWith(".apk")) {
-                    apks.add(f);
-                }
-            }
-        }
-        java.util.Collections.sort(apks, new java.util.Comparator<File>() {
-            @Override
-            public int compare(File a, File b) {
-                return Long.compare(b.lastModified(), a.lastModified());
-            }
-        });
+        reloadLocalApks(d, apks);
 
         if (apks.isEmpty()) {
             new android.app.AlertDialog.Builder(this)
@@ -449,13 +438,13 @@ public class UpdateActivity extends Activity {
             return;
         }
 
-        // 自定义列表：每行直接带「删除」按钮，点行可推送/安装
-        final java.util.List<String> names = new java.util.ArrayList<>();
-        for (File f : apks) {
-            names.add(f.getName() + "\n" + sizeText(f.length()));
-        }
         final android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<String>(
-                this, R.layout.item_version, R.id.item_title, names) {
+                this, R.layout.item_version, R.id.item_title, new java.util.ArrayList<String>()) {
+            @Override
+            public int getCount() {
+                return apks.size();
+            }
+
             @Override
             public View getView(int position, View convertView, ViewGroup parent) {
                 View v = convertView;
@@ -469,16 +458,17 @@ public class UpdateActivity extends Activity {
                 t1.setText(f.getName());
                 t2.setText(sizeText(f.length()) + "  ·  点此行推送/安装");
                 del.setVisibility(View.VISIBLE);
-                del.setOnClickListener(view -> {
-                    confirmDeleteApk(f);
-                    notifyDataSetChanged();
-                });
+                del.setOnClickListener(view -> confirmDeleteLocal(f, apks, this, d));
                 return v;
             }
         };
+
         final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
                 .setTitle("本地 APK（" + apks.size() + " 个）")
                 .setAdapter(ad, (dialog, which) -> {
+                    if (which < 0 || which >= apks.size()) {
+                        return;
+                    }
                     final File f = apks.get(which);
                     new android.app.AlertDialog.Builder(this)
                             .setTitle(f.getName())
@@ -496,6 +486,55 @@ public class UpdateActivity extends Activity {
                 .setNegativeButton("关闭", null)
                 .create();
         dlg.show();
+        appendLog("本地 APK：" + apks.size() + " 个（" + d.getAbsolutePath() + "）");
+    }
+
+    /** 从磁盘重新加载 APK 列表（按修改时间倒序）。 */
+    private void reloadLocalApks(File dir, java.util.List<File> out) {
+        out.clear();
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isFile() && f.getName().toLowerCase().endsWith(".apk")) {
+                    out.add(f);
+                }
+            }
+        }
+        java.util.Collections.sort(out, new java.util.Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return Long.compare(b.lastModified(), a.lastModified());
+            }
+        });
+    }
+
+    /** 删除本地 APK 后实时刷新弹窗列表。 */
+    private void confirmDeleteLocal(final File apk,
+                                    final java.util.List<File> apks,
+                                    final android.widget.ArrayAdapter<String> ad,
+                                    final File dir) {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("删除 APK")
+                .setMessage("确定删除？\n\n" + apk.getName() + "\n" + sizeText(apk.length()))
+                .setPositiveButton("删除", (dlg, w) -> {
+                    boolean ok = UpdateClient.deleteApkWithResidue(UpdateActivity.this, apk);
+                    if (!ok) {
+                        Toast.makeText(this, "删除失败（文件可能被占用）", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    appendLog("已删除：" + apk.getName());
+                    Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                    // 实时刷新：从列表移除、刷新行、更新版本库状态
+                    apks.remove(apk);
+                    ad.notifyDataSetChanged();
+                    versionAdapter.notifyDataSetChanged();
+                    if (apks.isEmpty()) {
+                        appendLog("本地 APK 已清空");
+                        openApkFolder();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 确认并删除本地 APK。 */
