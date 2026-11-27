@@ -124,6 +124,8 @@ public final class AdbRunner {
     private String runSerial(String... args) throws Exception {
         File adb = ensureBinary();
         execCmd(adb, null, "start-server");
+        // 每次执行前先确保设备已连接（adb connect 幂等，已连则返回 already connected，无害）
+        execCmd(adb, null, "connect", serial);
         List<String> cmd = new ArrayList<>();
         cmd.add(adb.getAbsolutePath());
         cmd.add("-s");

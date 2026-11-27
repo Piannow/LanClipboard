@@ -165,7 +165,7 @@ public class UpdateActivity extends Activity {
                 AdbRunner runner = new AdbRunner(UpdateActivity.this, ip, port);
                 boolean ok = runner.connect();
                 String adbOut = runner.lastOutput();
-                runner.disconnect();
+                // 保持连接，供后续检测版本/安装使用（不要 disconnect）
                 if (ok) {
                     connected = endpoint;
                     connectedIp = ip;
