@@ -431,21 +431,92 @@ public class UpdateActivity extends Activity {
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
         }
-        try {
-            // 优先用系统文件管理器打开该目录
-            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
-            android.net.Uri uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2F"
-                    + getPackageName() + "%2Ffiles%2Fdownloads");
-            intent.setDataAndType(uri, "vnd.android.document/directory");
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            appendLog("打开文件夹：" + dir.getAbsolutePath());
-        } catch (Throwable t) {
-            // 回退：用 FileProvider 分享目录里的 APK 列表，提示路径
-            appendLog("文件夹路径：" + dir.getAbsolutePath());
-            tvVerStatus.setText("APK 目录：" + dir.getAbsolutePath());
-            Toast.makeText(this, "路径：" + dir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        final File d = dir;
+        File[] files = dir.listFiles();
+        final java.util.List<File> apks = new java.util.ArrayList<>();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isFile() && f.getName().toLowerCase().endsWith(".apk")) {
+                    apks.add(f);
+                }
+            }
         }
+        apks.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+
+        if (apks.isEmpty()) {
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("APK 文件夹")
+                    .setMessage("目录为空\n\n" + d.getAbsolutePath()
+                            + "\n\n点「拉取版本列表」下载 APK 后会出现在这里。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+            appendLog("APK 目录（空）：" + d.getAbsolutePath());
+            return;
+        }
+
+        final CharSequence[] items = new CharSequence[apks.size()];
+        for (int i = 0; i < apks.size(); i++) {
+            File f = apks.get(i);
+            items[i] = f.getName() + "    " + sizeText(f.length());
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("本地 APK（" + apks.size() + " 个）")
+                .setItems(items, (dialog, which) -> {
+                    File f = apks.get(which);
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle(f.getName())
+                            .setMessage("路径：" + f.getAbsolutePath()
+                                    + "\n大小：" + sizeText(f.length()))
+                            .setItems(new CharSequence[]{"推送到已连接盒子", "安装到本机手机", "删除该 APK"}, (dd, sel) -> {
+                                if (sel == 0) {
+                                    pushLocalToBox(f);
+                                } else if (sel == 1) {
+                                    installLocalApk(f);
+                                } else {
+                                    confirmDeleteApk(f);
+                                }
+                            })
+                            .show();
+                })
+                .setNegativeButton("关闭", null)
+                .show();
+        appendLog("本地 APK：" + apks.size() + " 个（" + d.getAbsolutePath() + "）");
+    }
+
+    /** 确认并删除本地 APK。 */
+    private void confirmDeleteApk(final File apk) {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("删除 APK")
+                .setMessage("确定删除？\n\n" + apk.getName() + "\n" + sizeText(apk.length()))
+                .setPositiveButton("删除", (d, w) -> {
+                    boolean ok;
+                    try {
+                        ok = apk.delete();
+                    } catch (Throwable t) {
+                        ok = false;
+                    }
+                    if (ok) {
+                        appendLog("已删除：" + apk.getName());
+                        Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                        versionAdapter.notifyDataSetChanged();
+                    } else {
+                        appendLog("删除失败：" + apk.getName());
+                        Toast.makeText(this, "删除失败（文件可能被占用）", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 安装本地 APK 到本机手机。 */
+    private void installLocalApk(File apk) {
+        if (!InstallHelper.canInstall(this)) {
+            InstallHelper.openInstallSettings(this);
+            Toast.makeText(this, "请允许「安装未知应用」后重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        appendLog("安装到本机：" + apk.getName());
+        InstallHelper.promptInstall(this, apk);
     }
 
     private File pickLocalApk() {
