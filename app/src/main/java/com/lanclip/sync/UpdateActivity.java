@@ -29,6 +29,8 @@ public class UpdateActivity extends Activity {
 
     private static final String SELF_REPO = "Piannow/LanClipboard";
     private static final String SELF_PREFIX = "LanClipboard";
+    private static final String ASTR_REPO = "Piannow/AstrBotLite";
+    private static final String ASTR_PREFIX = "AstrBotLite";
     private static final String SELF_PACKAGE = "com.lanclip.sync";
 
     private TextView tvDevices;
@@ -38,7 +40,6 @@ public class UpdateActivity extends Activity {
     private TextView tvRemoteVer;
     private Button btnCheckRemote;
     private Button btnDownload;
-    private Button btnInstall;
     private TextView tvLog;
     private TextView tvVerStatus;
     private ListView listVersions;
@@ -69,7 +70,6 @@ public class UpdateActivity extends Activity {
         tvRemoteVer = findViewById(R.id.tv_remote_ver);
         btnCheckRemote = findViewById(R.id.btn_check_remote);
         btnDownload = findViewById(R.id.btn_download);
-        btnInstall = findViewById(R.id.btn_install);
         tvLog = findViewById(R.id.tv_log);
         tvVerStatus = findViewById(R.id.tv_ver_status);
         listVersions = findViewById(R.id.list_versions);
@@ -95,7 +95,7 @@ public class UpdateActivity extends Activity {
         findViewById(R.id.btn_scan).setOnClickListener(v -> scanLan());
         btnCheckRemote.setOnClickListener(v -> checkRemoteVersion());
         btnDownload.setOnClickListener(v -> downloadApk());
-        btnInstall.setOnClickListener(v -> pushInstall());
+        findViewById(R.id.btn_open_dir).setOnClickListener(v -> openApkFolder());
         findViewById(R.id.btn_copy_log).setOnClickListener(v -> copyLog());
         findViewById(R.id.btn_list_versions).setOnClickListener(v -> loadVersions());
 
@@ -110,7 +110,7 @@ public class UpdateActivity extends Activity {
                 t1.setText(r.version + "    " + r.apkName);
                 t1.setTextSize(16);
                 boolean has = localApkFor(r).exists();
-                t2.setText(has ? "已下载 · 点此安装到手机" : "未下载 · 点此下载 (" + sizeText(r.sizeBytes) + ")");
+                t2.setText(has ? "已下载 · 点此推送到盒子" : "未下载 · 点此下载 (" + sizeText(r.sizeBytes) + ")");
                 t2.setTextSize(12);
                 t2.setTextColor(getResources().getColor(has ? R.color.accent : R.color.dim));
                 return v;
@@ -145,45 +145,45 @@ public class UpdateActivity extends Activity {
     private void loadVersions() {
         tvVerStatus.setText("拉取版本列表…");
         worker.execute(() -> {
+            java.util.List<UpdateClient.ReleaseInfo> all = new java.util.ArrayList<>();
+            StringBuilder err = new StringBuilder();
             try {
-                List<UpdateClient.ReleaseInfo> list =
-                        new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).list();
-                ui.post(() -> {
-                    versions.clear();
-                    versions.addAll(list);
-                    versionAdapter.notifyDataSetChanged();
-                    int local = 0;
-                    for (UpdateClient.ReleaseInfo r : versions) {
-                        if (localApkFor(r).exists()) {
-                            local++;
-                        }
-                    }
-                    tvVerStatus.setText("共 " + versions.size() + " 个版本，本机已下载 " + local + " 个");
-                    appendLog("版本列表：" + versions.size() + " 个");
-                });
+                all.addAll(new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).list());
             } catch (Throwable t) {
-                ui.post(() -> {
-                    tvVerStatus.setText("拉取失败：" + t.getMessage());
-                    appendLog("拉取版本列表失败：" + t.getMessage());
-                });
+                err.append("剪切板：").append(t.getMessage()).append(" ");
             }
+            try {
+                all.addAll(new UpdateClient.Checker(ASTR_REPO, ASTR_PREFIX).list());
+            } catch (Throwable t) {
+                err.append("AstrBotLite：").append(t.getMessage()).append(" ");
+            }
+            final String errText = err.toString().trim();
+            ui.post(() -> {
+                versions.clear();
+                versions.addAll(all);
+                versionAdapter.notifyDataSetChanged();
+                int local = 0;
+                for (UpdateClient.ReleaseInfo r : versions) {
+                    if (localApkFor(r).exists()) {
+                        local++;
+                    }
+                }
+                if (versions.isEmpty()) {
+                    tvVerStatus.setText(errText.isEmpty() ? "没有可下载的版本" : "拉取失败：" + errText);
+                } else {
+                    tvVerStatus.setText("共 " + versions.size() + " 个版本，本机已下载 " + local + " 个"
+                            + (errText.isEmpty() ? "" : "（部分失败：" + errText + "）"));
+                }
+                appendLog("版本列表：" + versions.size() + " 个");
+            });
         });
     }
 
     private void onVersionClick(final UpdateClient.ReleaseInfo r) {
         final File local = localApkFor(r);
         if (local.exists() && local.length() > 0) {
-            // 已下载 → 询问：装到手机 / 推送到盒子
-            new android.app.AlertDialog.Builder(this)
-                    .setTitle("版本 " + r.version)
-                    .setItems(new CharSequence[]{"安装到本机手机", "推送到已连接盒子"}, (d, which) -> {
-                        if (which == 0) {
-                            installLocal(local);
-                        } else {
-                            pushLocalToBox(local);
-                        }
-                    })
-                    .show();
+            // 已下载 → 只推送到盒子
+            pushLocalToBox(local);
         } else {
             downloadVersion(r);
         }
@@ -204,9 +204,8 @@ public class UpdateActivity extends Activity {
                 ui.post(() -> {
                     downloading.remove(key);
                     versionAdapter.notifyDataSetChanged();
-                    tvVerStatus.setText(r.version + " 已下载：" + apk.getName());
+                    tvVerStatus.setText(r.version + " 已下载：" + apk.getName() + "（点此项推送到盒子）");
                     appendLog("已下载 " + r.version);
-                    installLocal(apk);
                 });
             } catch (Throwable t) {
                 ui.post(() -> {
@@ -216,16 +215,6 @@ public class UpdateActivity extends Activity {
                 });
             }
         });
-    }
-
-    private void installLocal(File apk) {
-        if (!InstallHelper.canInstall(this)) {
-            InstallHelper.openInstallSettings(this);
-            Toast.makeText(this, "请允许「安装未知应用」后重试", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        appendLog("安装到本机：" + apk.getName());
-        InstallHelper.promptInstall(this, apk);
     }
 
     private void pushLocalToBox(final File apk) {
@@ -429,42 +418,32 @@ public class UpdateActivity extends Activity {
         });
     }
 
-    // ---------- 推送安装到已连接盒子 ----------
+    // ---------- 打开 APK 文件夹 ----------
 
-    private void pushInstall() {
-        if (connected == null) {
-            Toast.makeText(this, "先连接盒子", Toast.LENGTH_SHORT).show();
-            return;
+    private void openApkFolder() {
+        File dir = getExternalFilesDir("downloads");
+        if (dir == null) {
+            dir = getFilesDir();
         }
-        btnInstall.setEnabled(false);
-        worker.execute(() -> {
-            AdbRunner runner = null;
-            try {
-                File local = pickLocalApk();
-                if (local == null) {
-                    ui.post(() -> appendLog("本地无 APK，请先下载一次"));
-                    return;
-                }
-                runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
-                boolean installed = runner.isPackageInstalled(SELF_PACKAGE);
-                if (installed && remoteVersion == null) {
-                    remoteVersion = runner.remoteVersion(SELF_PACKAGE);
-                }
-                appendLog("推送 " + local.getName() + " 到 " + connected + "…");
-                String result = runner.install(local.getAbsolutePath());
-                appendLog("安装结果：" + result.trim());
-            } catch (Throwable t) {
-                ui.post(() -> appendLog("推送失败：" + t.getMessage()));
-            } finally {
-                if (runner != null) {
-                    try {
-                        runner.disconnect();
-                    } catch (Throwable ignored) {
-                    }
-                }
-                ui.post(() -> btnInstall.setEnabled(true));
-            }
-        });
+        if (!dir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+        }
+        try {
+            // 优先用系统文件管理器打开该目录
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            android.net.Uri uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2F"
+                    + getPackageName() + "%2Ffiles%2Fdownloads");
+            intent.setDataAndType(uri, "vnd.android.document/directory");
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            appendLog("打开文件夹：" + dir.getAbsolutePath());
+        } catch (Throwable t) {
+            // 回退：用 FileProvider 分享目录里的 APK 列表，提示路径
+            appendLog("文件夹路径：" + dir.getAbsolutePath());
+            tvVerStatus.setText("APK 目录：" + dir.getAbsolutePath());
+            Toast.makeText(this, "路径：" + dir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private File pickLocalApk() {

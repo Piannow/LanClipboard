@@ -159,39 +159,12 @@ public class SenderActivity extends Activity {
         });
 
         updateTargetUi();
-        findViewById(R.id.btn_floating).setOnClickListener(v -> toggleFloating());
         btnScan.requestFocus();
         appendLog("提示：机顶盒端启动接收服务后，在手机上点扫描。");
     }
 
     /** 开启/关闭悬浮球（需「在其他应用上层显示」权限）。 */
-    private void toggleFloating() {
-        if (FloatingButtonService.running) {
-            stopService(new Intent(this, FloatingButtonService.class));
-            appendLog("悬浮球已关闭");
-            return;
-        }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M
-                && !android.provider.Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "请先允许「在其他应用上层显示」", Toast.LENGTH_LONG).show();
-            try {
-                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        android.net.Uri.parse("package:" + getPackageName())));
-            } catch (Throwable t) {
-                try {
-                    startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
-                } catch (Throwable ignored) {
-                }
-            }
-            return;
-        }
-        Intent svc = new Intent(this, FloatingButtonService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(svc);
-        } else {
-            startService(svc);
-        }
-        appendLog("悬浮球已开启：点一下开始/停止，长按退出");
+    private void toggleFloatingLegacy() {
     }
 
     @Override
@@ -253,9 +226,38 @@ public class SenderActivity extends Activity {
                 startService(intent);
             }
             appendLog("自动同步已开启：手机复制后会自动发送");
+            ensureFloating(true);
         } else {
             startService(new Intent(this, SenderService.class).setAction("STOP"));
             appendLog("自动同步已关闭");
+            ensureFloating(false);
+        }
+    }
+
+    /** 自动同步开/关时同步显示或收起悬浮球。 */
+    private void ensureFloating(boolean show) {
+        if (show) {
+            if (FloatingButtonService.running) {
+                return;
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M
+                    && !android.provider.Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请允许「在其他应用上层显示」以显示悬浮球", Toast.LENGTH_LONG).show();
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:" + getPackageName())));
+                } catch (Throwable ignored) {
+                }
+                return;
+            }
+            Intent svc = new Intent(this, FloatingButtonService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svc);
+            } else {
+                startService(svc);
+            }
+        } else {
+            stopService(new Intent(this, FloatingButtonService.class));
         }
     }
 

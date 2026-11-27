@@ -144,20 +144,20 @@
                 android:layout_height="48dp"
                 android:layout_marginTop="8dp"
                 android:background="@drawable/bg_btn_secondary"
-                android:text="下载 APK 到本机"
+                android:text="下载最新版到本机"
                 android:textColor="@color/text"
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
             <Button
-                android:id="@+id/btn_install"
+                android:id="@+id/btn_open_dir"
                 android:layout_width="match_parent"
-                android:layout_height="52dp"
+                android:layout_height="48dp"
                 android:layout_marginTop="8dp"
-                android:background="@drawable/bg_btn_primary"
-                android:text="推送安装到已连接盒子"
-                android:textColor="@color/accent_dark"
-                android:textSize="16sp"
+                android:background="@drawable/bg_btn_secondary"
+                android:text="打开 APK 文件夹"
+                android:textColor="@color/text"
+                android:textSize="15sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
