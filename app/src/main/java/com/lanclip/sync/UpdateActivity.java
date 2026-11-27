@@ -347,17 +347,21 @@ public class UpdateActivity extends Activity {
     // ---------- 扫描并列出 ----------
 
     private void scanLan() {
-        tvDevices.setText("扫描中…");
-        endpoints.clear();
-        adapter.notifyDataSetChanged();
         List<String> ips = Util.localIpv4();
         if (ips.isEmpty()) {
-            tvDevices.setText("未连接局域网");
+            tvDevices.setText("未连接局域网（没有可用 IP）");
+            appendLog("扫描失败：本机没有局域网 IP，请检查 WiFi/网线");
+            Toast.makeText(this, "未连接局域网", Toast.LENGTH_LONG).show();
             return;
         }
         final String myIp = ips.get(0);
+        tvDevices.setText("扫描中… 本机 " + myIp);
+        endpoints.clear();
+        adapter.notifyDataSetChanged();
         String manual = etPort.getText() == null ? "" : etPort.getText().toString().trim();
-        appendLog("扫描 " + myIp + " 所在网段…");
+        appendLog("扫描 " + myIp + " 所在网段的 adb 端口…");
+
+        final long startMs = System.currentTimeMillis();
         AdbScan.Listener listener = new AdbScan.Listener() {
             @Override
             public void onFound(final String endpoint) {
@@ -365,13 +369,23 @@ public class UpdateActivity extends Activity {
                     if (!endpoints.contains(endpoint)) {
                         endpoints.add(endpoint);
                         adapter.notifyDataSetChanged();
+                        appendLog("发现 " + endpoint);
                     }
                 });
             }
 
             @Override
             public void onDone(final int total) {
-                ui.post(() -> tvDevices.setText("找到 " + total + " 个盒子，点选连接"));
+                ui.post(() -> {
+                    long cost = (System.currentTimeMillis() - startMs) / 1000;
+                    if (total > 0) {
+                        tvDevices.setText("找到 " + total + " 个盒子（耗时 " + cost + "s），点选连接");
+                    } else {
+                        tvDevices.setText("未发现 adb 设备（耗时 " + cost + "s）\n"
+                                + "请确认：盒子已开无线调试、与手机同一网段、未被路由器隔离");
+                    }
+                    appendLog("扫描完成：找到 " + total + " 个（耗时 " + cost + "s）");
+                });
             }
         };
         if (manual.isEmpty()) {
@@ -379,6 +393,7 @@ public class UpdateActivity extends Activity {
         } else {
             try {
                 int port = Integer.parseInt(manual);
+                appendLog("只扫描端口 " + port);
                 AdbScan.scanPort(myIp, port, listener);
             } catch (Throwable t) {
                 tvDevices.setText("端口格式错误");
