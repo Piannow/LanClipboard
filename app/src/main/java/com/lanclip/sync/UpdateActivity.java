@@ -32,6 +32,7 @@ public class UpdateActivity extends Activity {
     private static final String ASTR_REPO = "Piannow/AstrBotLite";
     private static final String ASTR_PREFIX = "AstrBotLite";
     private static final String SELF_PACKAGE = "com.lanclip.sync";
+    private static final String ASTR_PACKAGE = "com.astrbot.lite";
 
     private TextView tvDevices;
     private ListView list;
@@ -39,7 +40,6 @@ public class UpdateActivity extends Activity {
     private TextView tvConnected;
     private TextView tvRemoteVer;
     private Button btnCheckRemote;
-    private Button btnDownload;
     private TextView tvLog;
     private TextView tvVerStatus;
     private ListView listVersions;
@@ -69,7 +69,6 @@ public class UpdateActivity extends Activity {
         tvConnected = findViewById(R.id.tv_connected);
         tvRemoteVer = findViewById(R.id.tv_remote_ver);
         btnCheckRemote = findViewById(R.id.btn_check_remote);
-        btnDownload = findViewById(R.id.btn_download);
         tvLog = findViewById(R.id.tv_log);
         tvVerStatus = findViewById(R.id.tv_ver_status);
         listVersions = findViewById(R.id.list_versions);
@@ -94,7 +93,6 @@ public class UpdateActivity extends Activity {
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         findViewById(R.id.btn_scan).setOnClickListener(v -> scanLan());
         btnCheckRemote.setOnClickListener(v -> checkRemoteVersion());
-        btnDownload.setOnClickListener(v -> downloadApk());
         findViewById(R.id.btn_open_dir).setOnClickListener(v -> openApkFolder());
         findViewById(R.id.btn_copy_log).setOnClickListener(v -> copyLog());
         findViewById(R.id.btn_list_versions).setOnClickListener(v -> loadVersions());
@@ -369,10 +367,13 @@ public class UpdateActivity extends Activity {
             try {
                 runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
                 String ver = runner.remoteVersion(SELF_PACKAGE);
+                String astrVer = runner.remoteVersion(ASTR_PACKAGE);
                 remoteVersion = ver;
+                final String lc = (ver == null ? "未安装" : ver);
+                final String ab = (astrVer == null ? "未安装" : astrVer);
                 ui.post(() -> {
-                    tvRemoteVer.setText("被控端版本：" + (ver == null ? "未安装" : ver));
-                    appendLog("被控端版本：" + (ver == null ? "未安装" : ver));
+                    tvRemoteVer.setText("剪切板：" + lc + "\nAstrBotLite：" + ab);
+                    appendLog("被控端 剪切板=" + lc + "，AstrBotLite=" + ab);
                 });
             } catch (Throwable t) {
                 ui.post(() -> {
@@ -386,36 +387,6 @@ public class UpdateActivity extends Activity {
                     } catch (Throwable ignored) {
                     }
                 }
-            }
-        });
-    }
-
-    // ---------- 下载 APK 到本机 ----------
-
-    private void downloadApk() {
-        btnDownload.setEnabled(false);
-        tvConnected.setText("下载剪切板 APK…");
-        worker.execute(() -> {
-            try {
-                UpdateClient.ReleaseInfo rel = new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).latest();
-                if (!rel.hasApk()) {
-                    ui.post(() -> tvConnected.setText("远程无 APK"));
-                    btnDownload.setEnabled(true);
-                    return;
-                }
-                File apk = UpdateClient.download(UpdateActivity.this, rel.apkUrl, "LanClipboard.apk",
-                        (done, total) -> ui.post(() -> tvConnected.setText("下载 " + pct(done, total))));
-                ui.post(() -> {
-                    tvConnected.setText("已下载：" + apk.getName() + "（可推送安装）");
-                    appendLog("已下载 " + rel.version + " 到本机");
-                });
-            } catch (Throwable t) {
-                ui.post(() -> {
-                    tvConnected.setText("下载失败：" + t.getMessage());
-                    appendLog("下载失败：" + t.getMessage());
-                });
-            } finally {
-                btnDownload.setEnabled(true);
             }
         });
     }
@@ -441,7 +412,12 @@ public class UpdateActivity extends Activity {
                 }
             }
         }
-        apks.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        java.util.Collections.sort(apks, new java.util.Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return Long.compare(b.lastModified(), a.lastModified());
+            }
+        });
 
         if (apks.isEmpty()) {
             new android.app.AlertDialog.Builder(this)

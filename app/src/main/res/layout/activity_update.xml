@@ -139,17 +139,6 @@
                 android:textStyle="bold" />
 
             <Button
-                android:id="@+id/btn_download"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_btn_secondary"
-                android:text="下载最新版到本机"
-                android:textColor="@color/text"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <Button
                 android:id="@+id/btn_open_dir"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
