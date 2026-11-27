@@ -116,10 +116,13 @@ public class UpdateActivity extends Activity {
                 t2.setTextColor(getResources().getColor(has ? R.color.accent : R.color.dim));
                 if (has) {
                     del.setVisibility(View.VISIBLE);
+                    del.setFocusable(false);
+                    del.setFocusableInTouchMode(false);
                     del.setOnClickListener(view -> confirmDeleteApk(f));
                 } else {
                     del.setVisibility(View.GONE);
                 }
+                v.setOnClickListener(view -> onVersionClick(r));
                 return v;
             }
         };
@@ -234,28 +237,59 @@ public class UpdateActivity extends Activity {
         });
     }
 
+    /** 弹出行操作：推送到盒子 / 安装到本机。 */
+    private void showApkActions(final File f) {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(f.getName())
+                .setMessage("路径：" + f.getAbsolutePath()
+                        + "\n大小：" + sizeText(f.length()))
+                .setItems(new CharSequence[]{"推送到已连接盒子", "安装到本机手机"}, (dd, sel) -> {
+                    if (sel == 0) {
+                        pushLocalToBox(f);
+                    } else {
+                        installLocalApk(f);
+                    }
+                })
+                .show();
+    }
+
     private void pushLocalToBox(final File apk) {
-        if (connected == null) {
-            Toast.makeText(this, "先连接盒子", Toast.LENGTH_SHORT).show();
+        if (!apk.exists()) {
+            Toast.makeText(this, "文件不存在", Toast.LENGTH_SHORT).show();
             return;
         }
+        // 未连接时自动尝试连接最近扫描到的设备
+        if (connected == null) {
+            if (endpoints.isEmpty()) {
+                Toast.makeText(this, "请先扫描并连接盒子", Toast.LENGTH_SHORT).show();
+                appendLog("推送失败：尚未连接盒子");
+                return;
+            }
+            appendLog("尚未连接，自动连接 " + endpoints.get(0) + "…");
+            connectDevice(endpoints.get(0));
+            Toast.makeText(this, "正在连接盒子，请稍后再次点击推送", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "正在推送到 " + connected + "…", Toast.LENGTH_SHORT).show();
+        appendLog("推送 " + apk.getName() + " 到 " + connected + "…");
         worker.execute(() -> {
             AdbRunner runner = null;
             try {
                 runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
-                appendLog("推送 " + apk.getName() + " 到 " + connected + "…");
                 String result = runner.install(apk.getAbsolutePath());
-                appendLog("安装结果：" + result.trim());
+                ui.post(() -> {
+                    appendLog("安装结果：" + result.trim());
+                    boolean ok = result.contains("Success");
+                    Toast.makeText(this, ok ? "推送安装成功" : "推送完成，见日志", Toast.LENGTH_SHORT).show();
+                });
             } catch (Throwable t) {
-                ui.post(() -> appendLog("推送失败：" + t.getMessage()));
-            } finally {
-                if (runner != null) {
-                    try {
-                        runner.disconnect();
-                    } catch (Throwable ignored) {
-                    }
-                }
+                final String msg = t.getMessage() == null ? t.toString() : t.getMessage();
+                ui.post(() -> {
+                    appendLog("推送失败：" + msg);
+                    Toast.makeText(this, "推送失败：" + msg, Toast.LENGTH_LONG).show();
+                });
             }
+            // 注意：不要 disconnect，保持连接供后续操作
         });
     }
 
@@ -458,7 +492,10 @@ public class UpdateActivity extends Activity {
                 t1.setText(f.getName());
                 t2.setText(sizeText(f.length()) + "  ·  点此行推送/安装");
                 del.setVisibility(View.VISIBLE);
+                del.setFocusable(false);
+                del.setFocusableInTouchMode(false);
                 del.setOnClickListener(view -> confirmDeleteLocal(f, apks, this, d));
+                v.setOnClickListener(view -> showApkActions(f));
                 return v;
             }
         };
