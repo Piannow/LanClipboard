@@ -689,7 +689,15 @@ public class UpdateActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 重新绑定下载进度（切页面回来仍能看到）
+        // 重新绑定下载/推送进度（切页面回来仍能看到）
+        try {
+            unregisterReceiver(downloadReceiver);
+        } catch (Throwable ignored) {
+        }
+        try {
+            unregisterReceiver(pushReceiver);
+        } catch (Throwable ignored) {
+        }
         try {
             registerReceiver(downloadReceiver,
                     new android.content.IntentFilter(DownloadService.ACTION_DOWNLOAD));
@@ -700,14 +708,20 @@ public class UpdateActivity extends Activity {
                     new android.content.IntentFilter(PushService.ACTION_PUSH));
         } catch (Throwable ignored) {
         }
-        // 恢复正在下载的进度
-        for (UpdateClient.ReleaseInfo r : versions) {
-            if (DownloadService.isDownloading(r.version)) {
-                Integer p = DownloadService.progressMap().get(r.version);
-                tvVerStatus.setText("下载 " + r.version + " " + (p == null || p < 0 ? "" : p + "%"));
-                break;
-            }
+        // 视图可能尚未就绪，做空值保护，避免 NPE 导致页面异常
+        if (versionAdapter == null || tvVerStatus == null) {
+            return;
         }
-        versionAdapter.notifyDataSetChanged();
+        try {
+            for (UpdateClient.ReleaseInfo r : versions) {
+                if (DownloadService.isDownloading(r.version)) {
+                    Integer p = DownloadService.progressMap().get(r.version);
+                    tvVerStatus.setText("下载 " + r.version + " " + (p == null || p < 0 ? "" : p + "%"));
+                    break;
+                }
+            }
+            versionAdapter.notifyDataSetChanged();
+        } catch (Throwable ignored) {
+        }
     }
 }
