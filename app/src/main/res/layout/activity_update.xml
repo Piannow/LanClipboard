@@ -161,6 +161,55 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
+        <LinearLayout
+            style="@style/Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical">
+
+            <TextView
+                style="@style/SectionTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="版本库 · 下载/安装" />
+
+            <TextView
+                android:id="@+id/tv_ver_status"
+                style="@style/Hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="点「拉取版本列表」，选择版本下载到本机目录；已下载的可用「安装」装到手机或推送到盒子。" />
+
+            <Button
+                android:id="@+id/btn_list_versions"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_btn_primary"
+                android:text="拉取版本列表"
+                android:textColor="@color/accent_dark"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <ListView
+                android:id="@+id/list_versions"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_marginTop="8dp"
+                android:divider="@color/line"
+                android:dividerHeight="1dp" />
+
+            <TextView
+                android:id="@+id/tv_local_install"
+                style="@style/Hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="已下载的 APK 保存在本机下载目录。" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/tv_log"
             style="@style/Hint"

@@ -40,6 +40,11 @@ public class UpdateActivity extends Activity {
     private Button btnDownload;
     private Button btnInstall;
     private TextView tvLog;
+    private TextView tvVerStatus;
+    private ListView listVersions;
+    private final List<UpdateClient.ReleaseInfo> versions = new ArrayList<>();
+    private ArrayAdapter<UpdateClient.ReleaseInfo> versionAdapter;
+    private final java.util.Map<String, String> downloading = new java.util.HashMap<>();
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -66,6 +71,8 @@ public class UpdateActivity extends Activity {
         btnDownload = findViewById(R.id.btn_download);
         btnInstall = findViewById(R.id.btn_install);
         tvLog = findViewById(R.id.tv_log);
+        tvVerStatus = findViewById(R.id.tv_ver_status);
+        listVersions = findViewById(R.id.list_versions);
 
         adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, endpoints) {
             @Override
@@ -90,6 +97,28 @@ public class UpdateActivity extends Activity {
         btnDownload.setOnClickListener(v -> downloadApk());
         btnInstall.setOnClickListener(v -> pushInstall());
         findViewById(R.id.btn_copy_log).setOnClickListener(v -> copyLog());
+        findViewById(R.id.btn_list_versions).setOnClickListener(v -> loadVersions());
+
+        versionAdapter = new ArrayAdapter<UpdateClient.ReleaseInfo>(this,
+                android.R.layout.simple_list_item_2, android.R.id.text1, versions) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                View v = super.getView(position, convertView, parent);
+                UpdateClient.ReleaseInfo r = versions.get(position);
+                TextView t1 = v.findViewById(android.R.id.text1);
+                TextView t2 = v.findViewById(android.R.id.text2);
+                t1.setText(r.version + "    " + r.apkName);
+                t1.setTextSize(16);
+                boolean has = localApkFor(r).exists();
+                t2.setText(has ? "已下载 · 点此安装到手机" : "未下载 · 点此下载 (" + sizeText(r.sizeBytes) + ")");
+                t2.setTextSize(12);
+                t2.setTextColor(getResources().getColor(has ? R.color.accent : R.color.dim));
+                return v;
+            }
+        };
+        listVersions.setAdapter(versionAdapter);
+        listVersions.setOnItemClickListener((parent, view, position, id) -> onVersionClick(versions.get(position)));
+
         findViewById(R.id.btn_scan).requestFocus();
     }
 
@@ -109,6 +138,147 @@ public class UpdateActivity extends Activity {
         } catch (Throwable t) {
             Toast.makeText(this, "复制失败：" + t.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ---------- 版本库：拉列表 / 下载 / 本机安装 ----------
+
+    private void loadVersions() {
+        tvVerStatus.setText("拉取版本列表…");
+        worker.execute(() -> {
+            try {
+                List<UpdateClient.ReleaseInfo> list =
+                        new UpdateClient.Checker(SELF_REPO, SELF_PREFIX).list();
+                ui.post(() -> {
+                    versions.clear();
+                    versions.addAll(list);
+                    versionAdapter.notifyDataSetChanged();
+                    int local = 0;
+                    for (UpdateClient.ReleaseInfo r : versions) {
+                        if (localApkFor(r).exists()) {
+                            local++;
+                        }
+                    }
+                    tvVerStatus.setText("共 " + versions.size() + " 个版本，本机已下载 " + local + " 个");
+                    appendLog("版本列表：" + versions.size() + " 个");
+                });
+            } catch (Throwable t) {
+                ui.post(() -> {
+                    tvVerStatus.setText("拉取失败：" + t.getMessage());
+                    appendLog("拉取版本列表失败：" + t.getMessage());
+                });
+            }
+        });
+    }
+
+    private void onVersionClick(final UpdateClient.ReleaseInfo r) {
+        final File local = localApkFor(r);
+        if (local.exists() && local.length() > 0) {
+            // 已下载 → 询问：装到手机 / 推送到盒子
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("版本 " + r.version)
+                    .setItems(new CharSequence[]{"安装到本机手机", "推送到已连接盒子"}, (d, which) -> {
+                        if (which == 0) {
+                            installLocal(local);
+                        } else {
+                            pushLocalToBox(local);
+                        }
+                    })
+                    .show();
+        } else {
+            downloadVersion(r);
+        }
+    }
+
+    private void downloadVersion(final UpdateClient.ReleaseInfo r) {
+        final String key = r.version;
+        if (downloading.containsKey(key)) {
+            Toast.makeText(this, "正在下载…", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        downloading.put(key, "1");
+        tvVerStatus.setText("下载 " + r.version + "…");
+        worker.execute(() -> {
+            try {
+                File apk = UpdateClient.download(this, r.apkUrl, localName(r), (done, total) ->
+                        ui.post(() -> tvVerStatus.setText("下载 " + r.version + " " + pct(done, total))));
+                ui.post(() -> {
+                    downloading.remove(key);
+                    versionAdapter.notifyDataSetChanged();
+                    tvVerStatus.setText(r.version + " 已下载：" + apk.getName());
+                    appendLog("已下载 " + r.version);
+                    installLocal(apk);
+                });
+            } catch (Throwable t) {
+                ui.post(() -> {
+                    downloading.remove(key);
+                    tvVerStatus.setText("下载失败：" + t.getMessage());
+                    appendLog("下载 " + r.version + " 失败：" + t.getMessage());
+                });
+            }
+        });
+    }
+
+    private void installLocal(File apk) {
+        if (!InstallHelper.canInstall(this)) {
+            InstallHelper.openInstallSettings(this);
+            Toast.makeText(this, "请允许「安装未知应用」后重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        appendLog("安装到本机：" + apk.getName());
+        InstallHelper.promptInstall(this, apk);
+    }
+
+    private void pushLocalToBox(final File apk) {
+        if (connected == null) {
+            Toast.makeText(this, "先连接盒子", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        worker.execute(() -> {
+            AdbRunner runner = null;
+            try {
+                runner = new AdbRunner(UpdateActivity.this, connectedIp, connectedPort);
+                appendLog("推送 " + apk.getName() + " 到 " + connected + "…");
+                String result = runner.install(apk.getAbsolutePath());
+                appendLog("安装结果：" + result.trim());
+            } catch (Throwable t) {
+                ui.post(() -> appendLog("推送失败：" + t.getMessage()));
+            } finally {
+                if (runner != null) {
+                    try {
+                        runner.disconnect();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        });
+    }
+
+    /** 本地目录中的 APK 文件（按版本命名）。 */
+    private File localApkFor(UpdateClient.ReleaseInfo r) {
+        File dir = getExternalFilesDir("downloads");
+        if (dir == null) {
+            dir = getFilesDir();
+        }
+        return new File(dir, localName(r));
+    }
+
+    private static String localName(UpdateClient.ReleaseInfo r) {
+        String n = r.apkName == null || r.apkName.isEmpty() ? "LanClipboard" : r.apkName;
+        if (!n.endsWith(".apk")) {
+            n = n + ".apk";
+        }
+        // 版本前缀，避免不同版本互相覆盖
+        return r.version + "-" + n;
+    }
+
+    private static String sizeText(long bytes) {
+        if (bytes <= 0) {
+            return "未知大小";
+        }
+        if (bytes < 1024 * 1024) {
+            return (bytes / 1024) + "KB";
+        }
+        return String.format(java.util.Locale.ROOT, "%.1fMB", bytes / 1048576.0);
     }
 
     // ---------- 扫描并列出 ----------

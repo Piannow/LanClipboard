@@ -11,8 +11,8 @@ android {
         // 19 = Android 4.4，覆盖大量 IPTV 机顶盒（华为 EC6108 / 中兴 B860AV / 创维 E900 等）
         minSdk 19
         targetSdk 28
-        versionCode 12
-        versionName "2.1"
+        versionCode 13
+        versionName "2.0"
     }
 
     signingConfigs {

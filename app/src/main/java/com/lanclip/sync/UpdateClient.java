@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.List;
 
 /**
  * GitHub Release 检测 + APK 下载。
@@ -104,6 +105,44 @@ public final class UpdateClient {
             String json = readStream(in);
             conn.disconnect();
             return new ReleaseInfo(new JSONObject(json), preferAssetPrefix);
+        }
+
+        /** 拉取全部 Release（不含草稿/预发布），按 tag 倒序，每个取 APK 资产。 */
+        public List<ReleaseInfo> list() throws Exception {
+            String url = "https://api.github.com/repos/" + repo + "/releases?per_page=30";
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(15000);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+            conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+            conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                InputStream es = conn.getErrorStream();
+                String msg = es == null ? "" : readStream(es);
+                conn.disconnect();
+                throw new IOException("GitHub API HTTP " + code + ": " + msg);
+            }
+            InputStream in = conn.getInputStream();
+            String json = readStream(in);
+            conn.disconnect();
+            JSONArray arr = new JSONArray(json);
+            List<ReleaseInfo> out = new java.util.ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject rel = arr.optJSONObject(i);
+                if (rel == null) {
+                    continue;
+                }
+                if (rel.optBoolean("draft") || rel.optBoolean("prerelease")) {
+                    continue;
+                }
+                ReleaseInfo info = new ReleaseInfo(rel, preferAssetPrefix);
+                if (info.hasApk()) {
+                    out.add(info);
+                }
+            }
+            return out;
         }
     }
 
