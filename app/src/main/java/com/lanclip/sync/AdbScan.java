@@ -27,8 +27,8 @@ public final class AdbScan {
     /** 覆盖绝大多数机顶盒使用的 adb 端口段（部分设备端口会偏移） */
     public static final int[] PORT_RANGE = {5555, 5585};
 
-    private static final int TIMEOUT_MS = 150;
-    private static final int THREADS = 200;
+    private static final int TIMEOUT_MS = 1000;
+    private static final int THREADS = 64;
 
     public interface Listener {
         /** found: 发现一个 adb 端点，格式 "ip:port"。 */
@@ -133,7 +133,7 @@ public final class AdbScan {
             }
         }
         try {
-            latch.await(15, TimeUnit.SECONDS);
+            latch.await(60, TimeUnit.SECONDS);
         } catch (InterruptedException ignored) {
         }
     }
