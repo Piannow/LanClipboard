@@ -16,18 +16,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 局域网扫描：探测 /24 网段内开放 ADB 无线调试端口的设备。
  *
- * 重要：整个扫描在独立后台线程执行，绝不阻塞调用方（UI）线程。
+ * 优化策略：
+ *  1) 先扫最常见的 5555（单端口并发，1 秒内出结果）
+ *  2) 再扫 5556-5585 的偏移端口，且某 IP 一旦命中就不再探测其余端口
+ *  3) 高并发 + 短超时，整体控制在数秒内
  */
 public final class AdbScan {
 
     public static final int ADB_DEFAULT_PORT = 5555;
+    /** 覆盖绝大多数机顶盒使用的 adb 端口段（部分设备端口会偏移） */
     public static final int[] PORT_RANGE = {5555, 5585};
 
-    /** 跨设备 TCP 握手在 WiFi 下需要更宽容的超时 */
-    private static final int TIMEOUT_MS = 300;
-    private static final int THREADS = 128;
+    private static final int TIMEOUT_MS = 150;
+    private static final int THREADS = 200;
 
     public interface Listener {
+        /** found: 发现一个 adb 端点，格式 "ip:port"。 */
         void onFound(String endpoint);
         void onDone(int total);
     }
@@ -35,15 +39,17 @@ public final class AdbScan {
     private AdbScan() {
     }
 
+    /** 扫描 /24 网段内的端口段。 */
     public static void scan(String localIp, Listener listener) {
         scanRange(localIp, PORT_RANGE[0], PORT_RANGE[1], listener);
     }
 
+    /** 只扫单个端口（手动指定时用）。 */
     public static void scanPort(String localIp, int port, Listener listener) {
         scanRange(localIp, port, port, listener);
     }
 
-    private static void scanRange(final String localIp, int portStart, int portEnd, final Listener listener) {
+    private static void scanRange(String localIp, int portStart, int portEnd, Listener listener) {
         final String prefix = prefixOf(localIp);
         if (prefix == null) {
             if (listener != null) {
@@ -58,55 +64,59 @@ public final class AdbScan {
         }
         final int ps = portStart;
         final int pe = portEnd;
+        final List<String> results = Collections.synchronizedList(new ArrayList<String>());
+        /** 已命中的 IP，命中后跳过其剩余端口 */
+        final Set<String> hitIps = Collections.synchronizedSet(new HashSet<String>());
+        final AtomicInteger found = new AtomicInteger(0);
 
-        // 全部丢到后台线程，调用方（UI 线程）立即返回
-        new Thread(() -> {
-            final List<String> results = Collections.synchronizedList(new ArrayList<String>());
-            final Set<String> hitIps = Collections.synchronizedSet(new HashSet<String>());
-            final AtomicInteger found = new AtomicInteger(0);
-            final ExecutorService pool = Executors.newFixedThreadPool(THREADS);
-            try {
-                int dp = (ps <= ADB_DEFAULT_PORT && ADB_DEFAULT_PORT <= pe) ? ADB_DEFAULT_PORT : ps;
-                // 先扫 5555，快速出结果
-                probe(pool, prefix, dp, dp, results, hitIps, found, listener);
-                // 再扫其余端口
+        final ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+
+        // 阶段一：先扫默认端口 5555（若在范围内），快速出结果
+        final int defaultPort = (ps <= ADB_DEFAULT_PORT && ADB_DEFAULT_PORT <= pe) ? ADB_DEFAULT_PORT : ps;
+        runRound(pool, prefix, defaultPort, defaultPort, results, hitIps, found, listener);
+
+        // 阶段二：扫剩余端口（跳过已不复存在的默认端口那一段）
+        final int dp = defaultPort;
+        Thread rest = new Thread(() -> {
+            if (ps != dp || pe != dp) {
                 if (ps < dp) {
-                    probe(pool, prefix, ps, dp - 1, results, hitIps, found, listener);
+                    runRound(pool, prefix, ps, dp - 1, results, hitIps, found, listener);
                 }
                 if (pe > dp) {
-                    probe(pool, prefix, dp + 1, pe, results, hitIps, found, listener);
+                    runRound(pool, prefix, dp + 1, pe, results, hitIps, found, listener);
                 }
-            } catch (Throwable ignored) {
-            } finally {
-                pool.shutdownNow();
+            }
+            pool.shutdown();
+            try {
+                pool.awaitTermination(20, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
             }
             if (listener != null) {
                 listener.onDone(found.get());
             }
-        }, "lanclip-scan").start();
+        }, "lanclip-scan");
+        rest.start();
     }
 
-    /** 并发探测某端口区间内的全部 /24 地址；仅在后台线程中调用。 */
-    private static void probe(ExecutorService pool, String prefix, int ps, int pe,
-                              final List<String> results, final Set<String> hitIps,
-                              final AtomicInteger found, final Listener listener) {
+    /** 对给定端口区间跑一轮全 /24 并发探测。 */
+    private static void runRound(ExecutorService pool, String prefix, int ps, int pe,
+                                 final List<String> results, final Set<String> hitIps,
+                                 final AtomicInteger found, final Listener listener) {
         final int portCount = pe - ps + 1;
-        if (portCount <= 0) {
-            return;
-        }
         final CountDownLatch latch = new CountDownLatch(254 * portCount);
         for (int i = 1; i <= 254; i++) {
             final String ip = prefix + "." + i;
             for (int p = ps; p <= pe; p++) {
                 final int port = p;
                 pool.execute(() -> {
-                    Socket s = null;
                     try {
+                        // 该 IP 已命中则跳过，省掉剩余端口探测
                         if (hitIps.contains(ip)) {
                             return;
                         }
-                        s = new Socket();
+                        Socket s = new Socket();
                         s.connect(new InetSocketAddress(ip, port), TIMEOUT_MS);
+                        s.close();
                         String ep = ip + ":" + port;
                         if (hitIps.add(ip) && !results.contains(ep)) {
                             results.add(ep);
@@ -117,20 +127,13 @@ public final class AdbScan {
                         }
                     } catch (Throwable ignored) {
                     } finally {
-                        if (s != null) {
-                            try {
-                                s.close();
-                            } catch (Throwable ignored) {
-                            }
-                        }
                         latch.countDown();
                     }
                 });
             }
         }
         try {
-            // 254 地址 / 128 线程 * 300ms ≈ 1.2s，留足余量
-            latch.await(30, TimeUnit.SECONDS);
+            latch.await(15, TimeUnit.SECONDS);
         } catch (InterruptedException ignored) {
         }
     }
