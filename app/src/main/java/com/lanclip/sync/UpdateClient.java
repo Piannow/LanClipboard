@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -26,6 +27,12 @@ public final class UpdateClient {
 
     private static final String TAG = "LanClipUpdate";
     private static final int THREADS = 4;
+
+    /** GitHub 在国内握手常很慢，给足时间，避免 8s 就失败。 */
+    private static final int CONNECT_TIMEOUT_MS = 30000;
+    private static final int READ_TIMEOUT_MS = 60000;
+    /** 建立连接失败（握手超时/被掐断）时的重试次数。 */
+    private static final int OPEN_RETRIES = 3;
 
     /** 远程仓库的最新 Release 信息 */
     public static final class ReleaseInfo {
@@ -87,46 +94,28 @@ public final class UpdateClient {
 
         public ReleaseInfo latest() throws Exception {
             String url = "https://api.github.com/repos/" + repo + "/releases/latest";
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(12000);
+            HttpURLConnection conn = open(url);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/vnd.github+json");
             conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
             conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                InputStream es = conn.getErrorStream();
-                String msg = es == null ? "" : readStream(es);
-                conn.disconnect();
-                throw new IOException("GitHub API HTTP " + code + ": " + msg);
-            }
-            InputStream in = conn.getInputStream();
-            String json = readStream(in);
-            conn.disconnect();
+            String json = fetchBodyWithRetry(url);
             return new ReleaseInfo(new JSONObject(json), preferAssetPrefix);
         }
 
         /** 拉取全部 Release（不含草稿/预发布），按 tag 倒序，每个取 APK 资产。 */
         public List<ReleaseInfo> list() throws Exception {
             String url = "https://api.github.com/repos/" + repo + "/releases?per_page=30";
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(15000);
+            HttpURLConnection conn = open(url);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/vnd.github+json");
             conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
             conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                InputStream es = conn.getErrorStream();
-                String msg = es == null ? "" : readStream(es);
-                conn.disconnect();
-                throw new IOException("GitHub API HTTP " + code + ": " + msg);
-            }
-            InputStream in = conn.getInputStream();
-            String json = readStream(in);
-            conn.disconnect();
+            String json = fetchBodyWithRetry(url);
             JSONArray arr = new JSONArray(json);
             List<ReleaseInfo> out = new java.util.ArrayList<>();
             for (int i = 0; i < arr.length(); i++) {
@@ -211,11 +200,9 @@ public final class UpdateClient {
                 long pos = segPos[idx];
                 try {
                     while (pos <= end) {
-                        HttpURLConnection conn = (HttpURLConnection) new URL(apkUrl).openConnection();
-                        conn.setConnectTimeout(10000);
-                        conn.setReadTimeout(30000);
-                        conn.setRequestProperty("Range", "bytes=" + pos + "-" + end);
-                        conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+                        HttpURLConnection conn = openWithMirrors(apkUrl, "bytes=" + pos + "-" + end);
+                        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                        conn.setReadTimeout(READ_TIMEOUT_MS);
                         int code = conn.getResponseCode();
                         if (code != 206 && code != 200) {
                             throw new IOException("下载失败 HTTP " + code);
@@ -347,10 +334,57 @@ public final class UpdateClient {
         return bos.toByteArray();
     }
 
+    /**
+     * Download URL candidates: GitHub direct link is often unreachable in CN.
+     * Try direct first, then acceleration mirrors.
+     */
+    private static List<String> downloadCandidates(String apkUrl) {
+        List<String> list = new ArrayList<String>();
+        list.add(apkUrl);
+        if (apkUrl.startsWith("https://github.com/")) {
+            String rest = apkUrl.substring("https://github.com/".length());
+            list.add("https://ghfast.top/https://github.com/" + rest);
+            list.add("https://gh-proxy.com/https://github.com/" + rest);
+            list.add("https://ghproxy.net/https://github.com/" + rest);
+        }
+        return list;
+    }
+
+    /**
+     * Try candidates in order, return the first connection answering 200/206.
+     */
+    private static HttpURLConnection openWithMirrors(String apkUrl, String rangeHeader) throws IOException {
+        IOException last = null;
+        for (String candidate : downloadCandidates(apkUrl)) {
+            try {
+                HttpURLConnection conn = (HttpURLConnection) new URL(candidate).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+                conn.setRequestProperty("Accept", "*/*");
+                if (rangeHeader != null) {
+                    conn.setRequestProperty("Range", rangeHeader);
+                }
+                int code = conn.getResponseCode();
+                if (code == 200 || code == 206) {
+                    Log.i(TAG, "reachable: " + candidate + " -> " + code);
+                    return conn;
+                }
+                conn.disconnect();
+                last = new IOException("HTTP " + code + " @ " + candidate);
+            } catch (IOException e) {
+                last = e;
+                Log.w(TAG, "candidate failed: " + candidate + " -> " + e.getMessage());
+            }
+        }
+        throw last == null ? new IOException("no available download url") : last;
+    }
+
     private static long contentLength(String apkUrl) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL(apkUrl).openConnection();
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(8000);
+        HttpURLConnection conn = openWithMirrors(apkUrl, null);
+        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        conn.setReadTimeout(READ_TIMEOUT_MS);
         conn.setRequestMethod("HEAD");
         conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
         int code = conn.getResponseCode();
@@ -358,11 +392,11 @@ public final class UpdateClient {
         conn.disconnect();
         // HEAD 可能 405，GET 一把只拿 header
         if (code != 200 && code != 206) {
-            HttpURLConnection c2 = (HttpURLConnection) new URL(apkUrl).openConnection();
+            HttpURLConnection c2 = openWithMirrors(apkUrl, null);
             c2.setRequestMethod("GET");
             c2.setRequestProperty("User-Agent", "LanClipboard-Updater");
-            c2.setConnectTimeout(8000);
-            c2.setReadTimeout(8000);
+            c2.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            c2.setReadTimeout(READ_TIMEOUT_MS);
             long l = c2.getContentLengthLong();
             c2.disconnect();
             return l;
@@ -376,10 +410,10 @@ public final class UpdateClient {
             dir = ctx.getFilesDir();
         }
         File out = new File(dir, fileName);
-        HttpURLConnection conn = (HttpURLConnection) new URL(apkUrl).openConnection();
+        HttpURLConnection conn = openWithMirrors(apkUrl, null);
         conn.setInstanceFollowRedirects(true);
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(30000);
+        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        conn.setReadTimeout(READ_TIMEOUT_MS);
         int code = conn.getResponseCode();
         if (code != 200) {
             conn.disconnect();
@@ -470,6 +504,74 @@ public final class UpdateClient {
             }
         }
         return false;
+    }
+
+    /**
+     * 打开连接：大超时 + 失败重试（指数退避）。
+     * GitHub 在国内经常握手超时或被中途掐断（unexpected end of stream），
+     * 单次 8s 超时几乎必失败，所以这里放宽超时并重试。
+     */
+    private static HttpURLConnection open(String url) throws IOException {
+        IOException last = null;
+        for (int attempt = 0; attempt < OPEN_RETRIES; attempt++) {
+            try {
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+                conn.setRequestProperty("Accept", "*/*");
+                // 不在此处 connect()，交由调用方设好 header 后再连
+                return conn;
+            } catch (IOException e) {
+                last = e;
+                Log.w(TAG, "open failed (" + (attempt + 1) + "/" + OPEN_RETRIES + "): " + url + " -> " + e.getMessage());
+                if (attempt + 1 < OPEN_RETRIES) {
+                    try {
+                        Thread.sleep(1500L * (attempt + 1));
+                    } catch (InterruptedException ignored) {
+                    }
+                }
+            }
+        }
+        throw last == null ? new IOException("无法连接：" + url) : last;
+    }
+
+    /** 读取整个响应体，遇到连接被掐断等异常时重试。 */
+    private static String fetchBodyWithRetry(String url) throws IOException {
+        IOException last = null;
+        for (int attempt = 0; attempt < OPEN_RETRIES; attempt++) {
+            HttpURLConnection conn = null;
+            try {
+                conn = open(url);
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    InputStream es = conn.getErrorStream();
+                    String msg = es == null ? "" : readStream(es);
+                    throw new IOException("GitHub API HTTP " + code + ": " + msg);
+                }
+                InputStream in = conn.getInputStream();
+                return readStream(in);
+            } catch (IOException e) {
+                last = e;
+                Log.w(TAG, "fetch failed (" + (attempt + 1) + "/" + OPEN_RETRIES + "): " + e.getMessage());
+                if (attempt + 1 < OPEN_RETRIES) {
+                    try {
+                        Thread.sleep(1500L * (attempt + 1));
+                    } catch (InterruptedException ignored) {
+                    }
+                }
+            } catch (Exception e) {
+                throw new IOException(e.getMessage() == null ? e.toString() : e.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }
+        throw last == null ? new IOException("请求失败：" + url) : last;
     }
 
     private static String readStream(InputStream in) throws Exception {
