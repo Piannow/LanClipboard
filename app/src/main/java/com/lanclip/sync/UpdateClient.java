@@ -200,9 +200,7 @@ public final class UpdateClient {
                 long pos = segPos[idx];
                 try {
                     while (pos <= end) {
-                        HttpURLConnection conn = openWithMirrors(apkUrl, "bytes=" + pos + "-" + end);
-                        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-                        conn.setReadTimeout(READ_TIMEOUT_MS);
+                        HttpURLConnection conn = openWithMirrors(apkUrl, "bytes=" + pos + "-" + end, "GET");
                         int code = conn.getResponseCode();
                         if (code != 206 && code != 200) {
                             throw new IOException("下载失败 HTTP " + code);
@@ -353,14 +351,14 @@ public final class UpdateClient {
     /**
      * Try candidates in order, return the first connection answering 200/206.
      */
-    private static HttpURLConnection openWithMirrors(String apkUrl, String rangeHeader) throws IOException {
+    private static HttpURLConnection openWithMirrors(String apkUrl, String rangeHeader, String method) throws IOException {
         IOException last = null;
         for (String candidate : downloadCandidates(apkUrl)) {
             try {
                 HttpURLConnection conn = (HttpURLConnection) new URL(candidate).openConnection();
                 conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
                 conn.setReadTimeout(READ_TIMEOUT_MS);
-                conn.setRequestMethod("GET");
+                conn.setRequestMethod(method == null ? "GET" : method);
                 conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
                 conn.setRequestProperty("Accept", "*/*");
                 if (rangeHeader != null) {
@@ -381,27 +379,66 @@ public final class UpdateClient {
         throw last == null ? new IOException("no available download url") : last;
     }
 
+    /**
+     * 取文件总长度。注意：openWithMirrors 里已经 connect 过，
+     * 调用方绝不能再 setRequestProperty / setRequestMethod，
+     * 否则会抛 "Cannot set request property after connection is made"。
+     */
     private static long contentLength(String apkUrl) throws IOException {
-        HttpURLConnection conn = openWithMirrors(apkUrl, null);
-        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        conn.setReadTimeout(READ_TIMEOUT_MS);
-        conn.setRequestMethod("HEAD");
-        conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
-        int code = conn.getResponseCode();
-        long len = conn.getContentLengthLong();
-        conn.disconnect();
-        // HEAD 可能 405，GET 一把只拿 header
-        if (code != 200 && code != 206) {
-            HttpURLConnection c2 = openWithMirrors(apkUrl, null);
-            c2.setRequestMethod("GET");
-            c2.setRequestProperty("User-Agent", "LanClipboard-Updater");
-            c2.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            c2.setReadTimeout(READ_TIMEOUT_MS);
-            long l = c2.getContentLengthLong();
-            c2.disconnect();
-            return l;
+        for (String candidate : downloadCandidates(apkUrl)) {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(candidate).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setRequestMethod("HEAD");
+                conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+                conn.setRequestProperty("Accept", "*/*");
+                int code = conn.getResponseCode();
+                long len = conn.getContentLengthLong();
+                if (code == 200 && len > 0) {
+                    return len;
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "HEAD failed: " + candidate + " -> " + t.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
         }
-        return len;
+        // HEAD 都不行，退回 Range 探测：请求 bytes=0-0，从 Content-Range 里取总长
+        for (String candidate : downloadCandidates(apkUrl)) {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(candidate).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", "LanClipboard-Updater");
+                conn.setRequestProperty("Range", "bytes=0-0");
+                int code = conn.getResponseCode();
+                if (code == 206 || code == 200) {
+                    String cr = conn.getHeaderField("Content-Range");
+                    if (cr != null) {
+                        int slash = cr.lastIndexOf('/');
+                        if (slash > 0) {
+                            long total = Long.parseLong(cr.substring(slash + 1).trim());
+                            if (total > 0) {
+                                return total;
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "range probe failed: " + candidate + " -> " + t.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }
+        return -1;
     }
 
     private static File simpleDownload(Context ctx, String apkUrl, String fileName, ProgressListener listener) throws Exception {
@@ -410,10 +447,7 @@ public final class UpdateClient {
             dir = ctx.getFilesDir();
         }
         File out = new File(dir, fileName);
-        HttpURLConnection conn = openWithMirrors(apkUrl, null);
-        conn.setInstanceFollowRedirects(true);
-        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        conn.setReadTimeout(READ_TIMEOUT_MS);
+        HttpURLConnection conn = openWithMirrors(apkUrl, null, "GET");
         int code = conn.getResponseCode();
         if (code != 200) {
             conn.disconnect();
