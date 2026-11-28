@@ -52,7 +52,9 @@ App 内带「更新中心」，两个按钮：
 gradle assembleRelease   # 需 JDK17 + Android SDK34 + Gradle8.7
 ```
 
-签名密钥不公开，自己配 `keystore.properties`。
+签名密钥 `lanclip.jks` 随 [Release v2.0](https://github.com/Piannow/LanClipboard/releases/tag/v2.0) 一并提供，用它构建出的 APK 可**直接覆盖安装**，不必先卸载。配置方法见 [SIGNING.md](SIGNING.md)。
+
+> 密钥是公开的，所以**不要把签名当作信任凭据**。对外分发请自行生成新密钥。
 
 ## 安全
 
